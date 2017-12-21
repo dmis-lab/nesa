@@ -1,0 +1,9 @@
+python-dateutil
+google-api-python-client
+httplib2
+nltk>=3.2.5
+numpy>=1.13.3
+oauth2client
+tensorboardX>=0.8
+torch=0.2.0.post3
+torchvision>=0.1.9
