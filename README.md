@@ -1,4 +1,4 @@
-# NETS: Neural Event Time Scheduler Utilizing User Intention and Context Understanding
+# NETS: Neural Event Time Scheduler Utilizing User Intention and Calendar Context
 Donghyeon Kim and Jinhyuk Lee et al.
 
 # Main components
