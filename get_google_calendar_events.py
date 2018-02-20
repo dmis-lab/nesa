@@ -238,11 +238,6 @@ def main():
                 dict_count(filtered_events_num, 'year 0')
                 continue
 
-            # filtering: skip recurring
-            if 'recurringEventId' in event:
-                dict_count(filtered_events_num, 'recurring')
-                continue
-
             register_dt = parse(created)
 
             start = event['start'].get('dateTime', event['start'].get('date'))
@@ -286,6 +281,9 @@ def main():
                 date(start_dt.year, start_dt.month, start_dt.day) - \
                 date(register_dt.year, register_dt.month, register_dt.day)
 
+            recurring_event_id = event.get('recurringEventId')
+            is_recurrent = recurring_event_id is not None
+
             # y
             start_time_slot = \
                 start_dt.minute // MINUTE_NORM \
@@ -312,6 +310,9 @@ def main():
             # distance between register and start
             evt_features.append(register_start_week_distance)
             evt_features.append(day_distance.days)
+
+            # is recurrent?
+            evt_features.append(is_recurrent)
 
             # y
             evt_features.append(start_time_slot)

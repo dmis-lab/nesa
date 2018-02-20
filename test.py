@@ -1,24 +1,23 @@
 import argparse
 import dataset
-import math
+# from dataset import NETSDataset, Config
 from model import NETS
 import numpy as np
 import os
 import pickle
-# import pprint
+import random
 import torch
+from torch.autograd import Variable
 
 
-def get_dataset(_config, pretrained_dict_path='./data/nets_sm_w0_dict.pkl'):
+def get_dataset(_config, pretrained_dict_path):
     if os.path.exists(_config.preprocess_load_path):
-        print('Found existing test dataset', _config.preprocess_load_path)
+        print('Found an existing test dataset', _config.preprocess_load_path)
         _test_dataset = pickle.load(open(_config.preprocess_load_path, 'rb'))
     else:
-        print('Creating new test dataset..', )
+        print('Creating a new test dataset..', )
         nets_dictionary = pickle.load(open(pretrained_dict_path, 'rb'))
-        _test_dataset = dataset.Dataset(_config,
-                                        pretrained_dict=nets_dictionary,
-                                        test_mode=True)
+        _test_dataset = dataset.NETSDataset(_config, nets_dictionary)
         if len(_test_dataset.test_data) == 0:
             print('no events')
             return None
@@ -26,111 +25,94 @@ def get_dataset(_config, pretrained_dict_path='./data/nets_sm_w0_dict.pkl'):
     return _test_dataset
 
 
-def get_model(_dataset, ckpt_path):
-    checkpoint = torch.load(ckpt_path)
+def get_model(_dataset, model_path, filename='nets_20180209.mdl'):
+    checkpoint = torch.load(model_path)
     ckpt_config = checkpoint['config']
-    ckpt_config.load_path = ckpt_path
-    ckpt_config.word_dr = 0.5
+    ckpt_config.load_path = model_path
     _dataset.config.__dict__.update(ckpt_config.__dict__)
 
     _model = NETS(ckpt_config, _dataset.widx2vec).cuda()
-    _model.config.checkpoint_dir = './data/'
-    _model.load_checkpoint()
+    _model.config.checkpoint_dir = os.path.join('./data/')
+    _model.load_checkpoint(filename=filename)
+    # import pprint
     # pprint.PrettyPrinter().pprint(_model.config.__dict__)
     return _model
 
 
-def measure_performance(_dataset, _nets_model, shuffle=False, topk=5):
-    def exclusive_topk(output, ex_target, _topk):
-        assert np.amin(output, 0) > -99999
-        output[ex_target] -= 99999
-        _max_idx = output.argsort()[-_topk:][::-1]
-        for mi in _max_idx:
-            assert mi not in ex_target
-        return _max_idx
-
-    def euclidean_distance(target, pred):
-        target_x = target // 24
-        target_y = target % 24
-        pred_x = pred // 24
-        pred_y = pred % 24
-        return math.sqrt(np.absolute(target_x - pred_x) ** 2 +
-                         np.absolute(target_y - pred_y) ** 2)
-    if shuffle:
-        _dataset.shuffle_data(mode='te')
-
+def measure_performance(_dataset, _nets_model, batch_size=1):
     performance_dict = dict()
-    performance_dict['acc1'] = 0.
-    performance_dict['acc5'] = 0.
+    performance_dict['recall1'] = 0.
+    performance_dict['recall5'] = 0.
     performance_dict['mrr'] = 0.
     performance_dict['ieuc'] = 0.
     performance_dict['count'] = 0
+    performance_dict['steps'] = 0.
 
-    while True:
-        inputs, targets = _dataset.get_next_batch(batch_size=1, mode='te',
-                                                  pad=True)
+    _, _, test_loader = _dataset.get_dataloader(batch_size=batch_size)
+    for d_idx, ex in enumerate(test_loader):
+        outputs, reps = _nets_model(*ex[:-1])
+        metrics = _nets_model.get_metrics(outputs,
+                                          Variable(ex[-1]).cuda(),
+                                          ex[-2])
 
-        outputs, reps = _nets_model(_dataset.parse_inputs(inputs))
+        performance_dict['recall1'] += metrics[0]
+        performance_dict['recall5'] += metrics[1]
+        performance_dict['mrr'] += metrics[3]
+        performance_dict['ieuc'] += metrics[4]
+        performance_dict['count'] += outputs.data.size()[0]
+        performance_dict['steps'] += 1.
 
-        ex_targets = [i[4] for i in inputs]
-        max_idx = torch.topk(outputs, 1)[1].data.cpu().numpy()
-        targets_value = torch.cat([o[t] for o, t in zip(outputs, targets)])
-        targets_value = targets_value.data.cpu().numpy()
-        _outputs = outputs.data.cpu().numpy()
+        if d_idx % 1000 == 0 and d_idx > 0:
+            print(d_idx)
 
-        outputs_topk = [exclusive_topk(o[:], et, topk) for (o, t, et)
-                        in zip(_outputs, targets, ex_targets)]
+    steps = performance_dict['steps']
+    recall1 = performance_dict['recall1'] / steps
+    recall5 = performance_dict['recall5'] / steps
+    mrr = performance_dict['mrr'] / steps
+    ieuc = performance_dict['ieuc'] / steps
 
-        performance_dict['acc1'] += np.sum([float(k == tk[0]) for (k, tk)
-                                            in zip(targets, outputs_topk)])
-        performance_dict['acc5'] += np.sum([float(k in tk) for (k, tk)
-                                            in zip(targets, outputs_topk)])
-        performance_dict['mrr'] += np.sum([1 / np.sum(t <= out)
-                                           for t, out
-                                           in zip(targets_value, _outputs)])
-        performance_dict['ieuc'] += \
-            np.sum([1 / (euclidean_distance(k, m) + 1)
-                    for (k, m) in zip(targets, max_idx)])
-        performance_dict['count'] += 1
-
-        if (_dataset.test_ptr + 1) % 1000 == 0:
-            print(_dataset.test_ptr)
-
-        if _dataset.test_ptr == 0:
-            # print('\ntest iteration end')
-            break
-
-    acc1 = performance_dict['acc1'] / performance_dict['count']
-    acc5 = performance_dict['acc5'] / performance_dict['count']
-    mrr = performance_dict['mrr'] / performance_dict['count']
-    ieuc = performance_dict['ieuc'] / performance_dict['count']
-
-    print('acc1 %.4f' % acc1)
-    print('acc5 %.4f' % acc5)
-    print('mrr  %.4f' % mrr)
-    print('ieuc %.4f' % ieuc)
+    print('recall@1 %.4f' % recall1)
+    print('recall@5 %.4f' % recall5)
+    print('mrr      %.4f' % mrr)
+    print('ieuc     %.4f' % ieuc)
     print('#events', performance_dict['count'])
+
+
+def set_seed_all(seed):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument("--test_path", type=str,
-                            default='./data/sample_events.csv')
-    arg_parser.add_argument("--preprocess_path", type=str,
+    arg_parser.add_argument("--input_path", type=str,
+                            default='./data/sample_data.csv')
+    arg_parser.add_argument("--serialized_data_path", type=str,
                             default='./data/preprocess(test).pkl')
+    arg_parser.add_argument("--model_path", type=str,
+                            default='./data/nets_20180209.mdl')
+    arg_parser.add_argument("--pretrained_dict_path", type=str,
+                            default='./data/nets_k1k2_grid_dict.pkl')
+    arg_parser.add_argument("--seed", type=int, default=3)
     args = arg_parser.parse_args()
 
+    set_seed_all(args.seed)
+
     config = dataset.Config()
-    config.test_path = args.test_path
-    config.preprocess_save_path = args.preprocess_path
-    config.preprocess_load_path = args.preprocess_path
+    config.test_path = args.input_path
+    config.preprocess_save_path = args.serialized_data_path
+    config.preprocess_load_path = args.serialized_data_path
 
     print('Loading test dataset')
-    test_dataset = get_dataset(config)
+    test_dataset = get_dataset(config, args.pretrained_dict_path)
     assert test_dataset is not None
 
     print('Loading NETS model')
-    nets_model = get_model(test_dataset, './data/conv_nets.pth')
+    nets_model = get_model(test_dataset, args.model_path)
 
     print('Measuring NETS performance on test data')
     measure_performance(test_dataset, nets_model)
