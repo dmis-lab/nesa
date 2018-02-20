@@ -38,7 +38,7 @@ $ python3 test.py
 ```
 $ python3 get_google_calendar_events.py
 ```
-* Check if <primary_calendar_id>_events.txt file is in __data__ directory
+* Check if <primary_calendar_id>_events.csv file is in __data__ directory
 * Event fields (12-column)
     * \[email_address, title, duration_minute, register_time, start_time, start_iso_year, start_iso_week, week_register_sequence, register_start_week_distance, register_start_day_distance, is_recurrent, start_time_slot\]
     * Sorted by year, week, and sequence in a week
@@ -47,5 +47,5 @@ $ python3 get_google_calendar_events.py
     * Example: example@example.com,Cafe with J,60,2017-09-19 11:21:43,2017-09-23 10:00:00,2017,38,4,0,1,False,260
 * Results of the model could be different for each dataset.
 ```
-$ python3 test.py --input_path ./data/<primary_calendar_id>_events.txt
+$ python3 test.py --input_path ./data/<primary_calendar_id>_events.csv
 ```

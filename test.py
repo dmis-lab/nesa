@@ -11,17 +11,13 @@ from torch.autograd import Variable
 
 
 def get_dataset(_config, pretrained_dict_path):
-    if os.path.exists(_config.preprocess_load_path):
-        print('Found an existing test dataset', _config.preprocess_load_path)
-        _test_dataset = pickle.load(open(_config.preprocess_load_path, 'rb'))
-    else:
-        print('Creating a new test dataset..', )
-        nets_dictionary = pickle.load(open(pretrained_dict_path, 'rb'))
-        _test_dataset = dataset.NETSDataset(_config, nets_dictionary)
-        if len(_test_dataset.test_data) == 0:
-            print('no events')
-            return None
-        pickle.dump(_test_dataset, open(_config.preprocess_save_path, 'wb'))
+    print('Creating the test dataset pickle..', )
+    nets_dictionary = pickle.load(open(pretrained_dict_path, 'rb'))
+    _test_dataset = dataset.NETSDataset(_config, nets_dictionary)
+    if len(_test_dataset.test_data) == 0:
+        print('no events')
+        return None
+    pickle.dump(_test_dataset, open(_config.preprocess_save_path, 'wb'))
     return _test_dataset
 
 
