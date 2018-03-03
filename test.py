@@ -91,7 +91,7 @@ if __name__ == '__main__':
     arg_parser.add_argument("--serialized_data_path", type=str,
                             default='./data/preprocess(test).pkl')
     arg_parser.add_argument("--model_path", type=str,
-                            default='./data/nets_20180209.mdl')
+                            default='./data/pack3_1.pth')
     arg_parser.add_argument("--pretrained_dict_path", type=str,
                             default='./data/nets_k1k2_grid_dict.pkl')
     arg_parser.add_argument("--seed", type=int, default=3)
