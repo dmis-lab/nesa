@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import numpy as np
 import math
+import os
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
 
@@ -141,11 +142,12 @@ class NETS(nn.Module):
         self.optimizer = optim.Adam(params, lr=config.lr,
                                     weight_decay=config.wd)
         self.criterion = nn.CrossEntropyLoss()
+
         if config.summary and _iter is not None:
             summary_path = 'runs/' + config.model_name + '_' + str(_iter)
-            self.train_writer = SummaryWriter(summary_path + '/train')
-            self.valid_writer = SummaryWriter(summary_path + '/valid')
-            self.test_writer = SummaryWriter(summary_path + '/test')
+            self.train_writer = SummaryWriter(log_dir=summary_path + '/train')
+            self.valid_writer = SummaryWriter(log_dir=summary_path + '/valid')
+            self.test_writer = SummaryWriter(log_dir=summary_path + '/test')
 
     def init_word_embed(self, widx2vec):
         self.word_embed.weight.data.copy_(torch.from_numpy(np.array(widx2vec)))
@@ -246,32 +248,41 @@ class NETS(nn.Module):
                 total_size += multiply_iter(p.size())
             if debug:
                 print(p.requires_grad, p.size())
-        print('%s\n' % '{:,}'.format(total_size))
+        print('%s' % '{:,}'.format(total_size))
         return params
 
     def get_rnn_out(self, batch_size, batch_max_seqlen, tl,
                     packed_lstm_input, idx_unsort,
                     init_rnn_h, rnn, rnn_hdim, rnn_out_dr):
-        # initial state
-        init_h = init_rnn_h(batch_size)
+        assert idx_unsort is not None
 
         # rnn
-        rnn_out, _ = rnn(packed_lstm_input, init_h)
+        rnn_out, (ht, ct) = rnn(packed_lstm_input, init_rnn_h(batch_size))
 
-        # unpack output for eval
+        # hidden state could be used for single layer rnn
+        if rnn.num_layers == 1:
+            ht = ht[:, idx_unsort]
+
+            if rnn.bidirectional:
+                ht = torch.cat((ht[0], ht[1]), dim=1)
+            else:
+                ht = ht[0]
+
+            return F.dropout(ht, p=rnn_out_dr, training=self.training)
+
+        # unpack output
         # (L, B, rnn_hidden_size * num_directions)
-        if not self.training:
-            rnn_out, _ = pad_packed_sequence(rnn_out,
-                                             batch_first=self.batch_first)
+        rnn_out, _ = pad_packed_sequence(rnn_out,
+                                         batch_first=self.batch_first)
 
         # transpose
         # (B, L, rnn_hidden_size * num_directions)
         rnn_out = rnn_out.transpose(0, 1).contiguous()
 
         # unsort
-        if not self.training:
-            rnn_out = rnn_out[idx_unsort]
-            tl = tl[idx_unsort]
+        # rnn_out should be batch_first
+        rnn_out = rnn_out[idx_unsort]
+        tl = tl[idx_unsort]
 
         # flatten
         # (B * L, rnn_hidden_size * num_directions)
@@ -281,12 +292,25 @@ class NETS(nn.Module):
         fw_idxes = (torch.arange(0, batch_size).type(
             torch.cuda.LongTensor) * batch_max_seqlen + tl.data - 1).cuda()
 
+        selected_fw = rnn_out[fw_idxes]
+        selected_fw = selected_fw[:, :rnn_hdim]
+
         # https://github.com/pytorch/pytorch/issues/3587#issuecomment-348340401
         # https://github.com/pytorch/pytorch/issues/3587#issuecomment-354284160
-        selected_steps = rnn_out[fw_idxes, :].view(
-            -1, rnn_hdim * self.num_directions)
-        return F.dropout(selected_steps, p=rnn_out_dr,
-                         training=self.training)
+        if rnn.bidirectional:
+            bw_idxes = (torch.arange(0, batch_size).type(
+                torch.cuda.LongTensor) * batch_max_seqlen).cuda()
+
+            selected_bw = rnn_out[bw_idxes]
+            selected_bw = selected_bw[:, rnn_hdim:]
+
+            return F.dropout(torch.cat((selected_fw, selected_bw), 1),
+                             p=rnn_out_dr,
+                             training=self.training)
+        else:
+            return F.dropout(selected_fw,
+                             p=rnn_out_dr,
+                             training=self.training)
 
     def title_layer(self, tc, tw, tl, mode='t'):
         # it's snapshot size if mode='st'
@@ -325,14 +349,12 @@ class NETS(nn.Module):
             tw_tensor[idx, :seqlen] = torch.cuda.LongTensor(seq[:seqlen])
 
         # sort tc_tensor and tw_tensor by seq len
-        idx_unsort = None
-        if not self.training:
-            tl, perm_idxes = tl.sort(dim=0, descending=True)
-            tc_tensor = tc_tensor[perm_idxes]
-            tw_tensor = tw_tensor[perm_idxes]
+        tl, perm_idxes = tl.sort(dim=0, descending=True)
+        tc_tensor = tc_tensor[perm_idxes]
+        tw_tensor = tw_tensor[perm_idxes]
 
-            # to be used after RNN to restore the order
-            _, idx_unsort = torch.sort(perm_idxes, dim=0, descending=False)
+        # to be used after RNN to restore the order
+        _, idx_unsort = torch.sort(perm_idxes, dim=0, descending=False)
 
         # character embedding for title character
         # (B * L, max_wordlen, char_embed_dim)
@@ -373,15 +395,11 @@ class NETS(nn.Module):
         # concat title character conv result and title word embedding
         # (L, B, sum(tc_conv_fn) + word_embed_dim)
         lstm_input = torch.cat((conv_result, tw_embed), 2)
-        # lstm_input = tw_embed
 
-        # Pad only for eval
-        if not self.training:
-            packed_lstm_input = \
-                pack_padded_sequence(lstm_input, tl.data.tolist(),
-                                     batch_first=self.batch_first)
-        else:
-            packed_lstm_input = lstm_input
+        # pack, response for variable length batch
+        packed_lstm_input = \
+            pack_padded_sequence(lstm_input, tl.data.tolist(),
+                                 batch_first=self.batch_first)
 
         # for input title
         if mode == 't':
@@ -798,9 +816,11 @@ class NETS(nn.Module):
 
     def save_checkpoint(self, state, filename=None):
         if filename is None:
-            filename = self.config.checkpoint_dir + self.config.model_name
+            filename = os.path.join(self.config.checkpoint_dir,
+                                    self.config.model_name + '.pth')
         else:
-            filename = self.config.checkpoint_dir + filename
+            filename = os.path.join(self.config.checkpoint_dir,
+                                    filename + '.pth')
         print('\t=> save checkpoint %s' % filename)
         torch.save(state, filename)
 
@@ -825,11 +845,19 @@ class NETS(nn.Module):
         else:
             raise ValueError('Invalid mode %s' % mode)
 
-        writer.add_scalar('metric/loss', metrics[0], offset)
-        writer.add_scalar('metric/acc1', metrics[1], offset)
-        writer.add_scalar('metric/acc5', metrics[2], offset)
-        writer.add_scalar('metric/mrr', metrics[3], offset)
-        writer.add_scalar('metric/euc', metrics[4], offset)
+        writer.add_scalar('%s/loss' % mode, metrics[0], offset)
+        writer.add_scalar('%s/recall@1' % mode, metrics[1], offset)
+        writer.add_scalar('%s/recall@5' % mode, metrics[2], offset)
+        writer.add_scalar('%s/recall@10' % mode, metrics[3], offset)
+        writer.add_scalar('%s/mrr' % mode, metrics[4], offset)
+        writer.add_scalar('%s/ieuc' % mode, metrics[5], offset)
+        writer.add_scalar('%s/ndcg@5' % mode, metrics[6], offset)
+        writer.add_scalar('%s/ndcg@10' % mode, metrics[7], offset)
+
+        for name, param in self.named_parameters():
+            if not param.requires_grad:
+                continue
+            writer.add_histogram(name, param.clone().cpu().data.numpy(), offset)
 
     def close_summary_writer(self):
         self.train_writer.close()

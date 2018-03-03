@@ -21,15 +21,16 @@ def get_dataset(_config, pretrained_dict_path):
     return _test_dataset
 
 
-def get_model(_dataset, model_path, filename='nets_20180209.mdl'):
+def get_model(_dataset, model_path):
+    model_dir, model_filename = os.path.split(model_path)
     checkpoint = torch.load(model_path)
     ckpt_config = checkpoint['config']
     ckpt_config.load_path = model_path
     _dataset.config.__dict__.update(ckpt_config.__dict__)
 
     _model = NETS(ckpt_config, _dataset.widx2vec).cuda()
-    _model.config.checkpoint_dir = os.path.join('./data/')
-    _model.load_checkpoint(filename=filename)
+    _model.config.checkpoint_dir = model_dir + '/'
+    _model.load_checkpoint(filename=model_filename)
     # import pprint
     # pprint.PrettyPrinter().pprint(_model.config.__dict__)
     return _model

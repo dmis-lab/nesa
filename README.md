@@ -2,25 +2,25 @@
 Donghyeon Kim and Jinhyuk Lee et al.
 
 # Prerequisites
-* pytorch 0.3.1
+* [PyTorch](http://pytorch.org/) 0.3.1
 * NVIDIA GPU (memory size: 8GB or greater)
-    * CUDA 9.1
-    * cuDNN 7
-* A Google account
+    * [CUDA](https://developer.nvidia.com/cuda-downloads) 9.1
+    * [cuDNN](https://developer.nvidia.com/cudnn) 7
+* A [Google](https://www.google.com) account
 
-# Download sample data
+# Download sample data (Check if working directory is "nets")
 ```
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-man/nets/sample_data.csv
+$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/sample_data.csv
 ```
 
 # Download word, character dictionaries
 ```
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-man/nets/nets_k1k2_grid_dict.pkl
+$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/nets_k1k2_grid_dict.pkl
 ```
 
 # Download pretrained NETS model
 ```
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-man/nets/nets_20180209.mdl
+$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/pack3_1.pth
 ```
 
 # Run NETS w/ sample data
