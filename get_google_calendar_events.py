@@ -21,6 +21,7 @@ output_dir = './data'
 MINUTE_NORM = 30
 print_valid_events = False
 allow_non_eng_users = True
+allow_inactive_users = True
 
 if not os.path.exists(
         os.path.join(
@@ -149,12 +150,13 @@ def filter_user(events, title_idx, valid_week_evt_cnt_dict,
               % len(events), '<', min_num_events)
         return True
 
-    # average week event num < 1.75 -> inactive
-    avg_num_week_events = len(events) / len(valid_week_evt_cnt_dict)
-    if avg_num_week_events < active_avg_num_week_events:
-        print('Please run for more active users: avg_num_week_events=%.2f'
-              % avg_num_week_events, '<', active_avg_num_week_events)
-        return True
+    if not allow_inactive_users:
+        # average week event num < 1.75 -> inactive
+        avg_num_week_events = len(events) / len(valid_week_evt_cnt_dict)
+        if avg_num_week_events < active_avg_num_week_events:
+            print('Please run for more active users: avg_num_week_events=%.2f'
+                  % avg_num_week_events, '<', active_avg_num_week_events)
+            return True
     return False
 
 
