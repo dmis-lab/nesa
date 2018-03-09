@@ -8,6 +8,7 @@ import math
 import os
 from torch.autograd import Variable
 from tensorboardX import SummaryWriter
+from utils import profile
 
 
 class NETS(nn.Module):
@@ -312,6 +313,7 @@ class NETS(nn.Module):
                              p=rnn_out_dr,
                              training=self.training)
 
+    @profile(__name__)
     def title_layer(self, tc, tw, tl, mode='t'):
         # it's snapshot size if mode='st'
         tl = Variable(torch.cuda.LongTensor(tl))
@@ -421,6 +423,7 @@ class NETS(nn.Module):
         else:
             raise ValueError('Invalid mode %s' % mode)
 
+    @profile(__name__)
     def intention_layer(self, user, dur, title):
         # Highway network on concat
         if not self.config.no_title:
@@ -431,6 +434,7 @@ class NETS(nn.Module):
         gate = F.sigmoid(self.it_gate(concat))
         return torch.mul(gate, nonl) + torch.mul(1 - gate, concat)
 
+    @profile(__name__)
     def snapshot_title_layer(self, stc, stw, stl):
         stacked_tc = []
         stacked_tw = []
@@ -460,6 +464,7 @@ class NETS(nn.Module):
 
         return split_titles
 
+    @profile(__name__)
     def snapshot_layer(self, user_embed, stitle, sdur, sslot):
         # # test
         # return Variable(
@@ -497,6 +502,7 @@ class NETS(nn.Module):
                 snapshot_rep_list.append(snapshot_rep)
         return torch.cat(snapshot_rep_list, dim=0)
 
+    @profile(__name__)
     def snapshot_layer_core(self, user_embed, title, dur, slot):
         new_slot = None
         snapshot_contents = None
@@ -627,6 +633,7 @@ class NETS(nn.Module):
 
         return snapshot_mf, saved_slot
 
+    @profile(__name__)
     def matching_layer(self, title, intention, snapshot_mf, grid):
         # Highway network for mf
         concat_seq = list()
@@ -653,6 +660,7 @@ class NETS(nn.Module):
 
         return self.output_fc1(output)
 
+    @profile(__name__)
     def forward(self, user, dur, tc, tw, tl, stc, stw, stl, sdur, sslot, gr):
         """
         11 Features
@@ -734,6 +742,7 @@ class NETS(nn.Module):
 
         print('\tlearning rate decay to %.3f' % self.config.lr)
 
+    @profile(__name__)
     def get_metrics(self, outputs, targets, ex_targets=None):
         outputs_max_idxes = torch.squeeze(torch.topk(outputs, 1)[1], dim=1).data
         outputs_topall_idxes = torch.topk(outputs, self.n_classes)[1].data
@@ -835,6 +844,7 @@ class NETS(nn.Module):
         self.optimizer.load_state_dict(checkpoint['optimizer'])
         # self.config = checkpoint['config']
 
+    @profile(__name__)
     def write_summary(self, mode, metrics, offset):
         if mode == 'tr':
             writer = self.train_writer

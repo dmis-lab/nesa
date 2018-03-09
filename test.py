@@ -27,6 +27,7 @@ def get_model(_dataset, model_path):
     ckpt_config = checkpoint['config']
     ckpt_config.load_path = model_path
     _dataset.config.__dict__.update(ckpt_config.__dict__)
+    ckpt_config.__dict__.update(_dataset.config.__dict__)
 
     _model = NETS(ckpt_config, _dataset.widx2vec).cuda()
     _model.config.checkpoint_dir = model_dir + '/'
