@@ -21,15 +21,12 @@ def get_dataset(_config, pretrained_dict_path):
     return _test_dataset
 
 
-def get_model(_dataset, model_path):
+def get_model(widx2vec, model_path):
     model_dir, model_filename = os.path.split(model_path)
     checkpoint = torch.load(model_path)
     ckpt_config = checkpoint['config']
-    ckpt_config.load_path = model_path
-    _dataset.config.__dict__.update(ckpt_config.__dict__)
-    ckpt_config.__dict__.update(_dataset.config.__dict__)
 
-    _model = NETS(ckpt_config, _dataset.widx2vec).cuda()
+    _model = NETS(ckpt_config, widx2vec).cuda()
     _model.config.checkpoint_dir = model_dir + '/'
     _model.load_checkpoint(filename=model_filename)
     # import pprint
@@ -105,12 +102,12 @@ if __name__ == '__main__':
     config.preprocess_save_path = args.serialized_data_path
     config.preprocess_load_path = args.serialized_data_path
 
-    print('Loading test dataset')
+    print('Loading test dataset..')
     test_dataset = get_dataset(config, args.pretrained_dict_path)
     assert test_dataset is not None
 
-    print('Loading NETS model')
-    nets_model = get_model(test_dataset, args.model_path)
+    print('Loading NETS model..')
+    nets_model = get_model(test_dataset.widx2vec, args.model_path)
 
-    print('Measuring NETS performance on test data')
+    print('\nMeasuring NETS performance on test data..')
     measure_performance(test_dataset, nets_model)
