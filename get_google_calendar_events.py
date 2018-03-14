@@ -199,6 +199,8 @@ def main():
             break
 
     print('Getting calendar events of', primary_calendar_id)
+    # from datetime import datetime
+    # now = datetime.utcnow().isoformat() + 'Z'  # UTC
     request = service.events().list(
         calendarId=calendarId,
         # timeMin=now,
@@ -207,6 +209,7 @@ def main():
         orderBy='startTime')
 
     num_events = 0
+    events_total = list()
     valid_events = list()
     week_sequence_dict = dict()
     filtered_events_num = dict()
@@ -219,113 +222,122 @@ def main():
         if not events:
             print('No upcoming events found.')
 
-        for event in events:
-
-            # filtering: invalid titles
-            if event.get('summary') is None:
-                dict_count(filtered_events_num, 'no title')
-                continue
-            elif filter_title(event['summary']):
-                dict_count(filtered_events_num, 'invalid title')
-                continue
-
-            # filtering: skip all-day events
-            if event['start'].get('dateTime') is None:
-                dict_count(filtered_events_num, 'all-day')
-                continue
-
-            # filtering: year 0 is out of range
-            created = event['created']
-            if '0000' == created[:4]:
-                dict_count(filtered_events_num, 'year 0')
-                continue
-
-            register_dt = parse(created)
-
-            start = event['start'].get('dateTime', event['start'].get('date'))
-            start_dt = parse(start)
-
-            # filtering: a past
-            if start_dt.toordinal() < register_dt.toordinal():
-                dict_count(filtered_events_num, 'past')
-                continue
-
-            end = event['end'].get('dateTime', event['end'].get('date'))
-            end_dt = parse(end)
-
-            # filtering: phone call or too long duration
-            duration = end_dt - start_dt
-            if not is_valid_duration(duration):
-                dict_count(filtered_events_num, 'invalid duration')
-                continue
-
-            start_iso_year, start_iso_week_num, _ = \
-                date(start_dt.year, start_dt.month, start_dt.day).isocalendar()
-
-            yw = start_iso_year * 100 + start_iso_week_num
-            if yw in valid_week_evt_cnt_dict:
-                valid_week_evt_cnt_dict[yw] += 1
-            else:
-                valid_week_evt_cnt_dict[yw] = 1
-
-            week_register_sequence = week_sequence_dict.get(
-                (start_iso_year, start_iso_week_num))
-            if week_register_sequence is None:
-                week_register_sequence = 0  # start with 0
-            else:
-                week_register_sequence += 1
-            week_sequence_dict[(start_iso_year, start_iso_week_num)] = \
-                week_register_sequence
-
-            register_start_week_distance = get_week_distance(
-                register_dt, start_dt)
-            day_distance = \
-                date(start_dt.year, start_dt.month, start_dt.day) - \
-                date(register_dt.year, register_dt.month, register_dt.day)
-
-            recurring_event_id = event.get('recurringEventId')
-            is_recurrent = recurring_event_id is not None
-
-            # y
-            start_time_slot = \
-                start_dt.minute // MINUTE_NORM \
-                + start_dt.hour * int(60 / MINUTE_NORM) \
-                + start_dt.weekday() * int((60 * 24) / MINUTE_NORM)
-
-            # If you change the order of event features,
-            # check itemgetter parameters below.
-            evt_features = list()
-            evt_features.append(primary_calendar_id)  # originally, user id
-            # evt_features.append(event['iCalUID'])
-
-            # title, duration, register time, start time
-            evt_features.append(event['summary'])
-            evt_features.append(duration.seconds // 60)  # minute
-            evt_features.append(register_dt)
-            evt_features.append(start_dt)
-
-            # sort by year, week, register sequence in a week
-            evt_features.append(start_iso_year)
-            evt_features.append(start_iso_week_num)
-            evt_features.append(week_register_sequence)
-
-            # distance between register and start
-            evt_features.append(register_start_week_distance)
-            evt_features.append(day_distance.days)
-
-            # is recurrent?
-            evt_features.append(is_recurrent)
-
-            # y
-            evt_features.append(start_time_slot)
-
-            valid_events.append(evt_features)
-
-            if print_valid_events:
-                print(evt_features)
-        request = service.events().list_next(request, response)
+        events_total.extend(events)
         num_events += len(events)
         print(num_events)
+
+        request = service.events().list_next(request, response)
+
+    # sort by register time
+    reg_sorted_events = list()
+    for event in events_total:
+        event['created_dt'] = parse(event['created'])
+        reg_sorted_events.append(event)
+    reg_sorted_events = sorted(reg_sorted_events, key=itemgetter('created_dt'))
+
+    for event in reg_sorted_events:
+        # filtering: invalid titles
+        if event.get('summary') is None:
+            dict_count(filtered_events_num, 'no title')
+            continue
+        elif filter_title(event['summary']):
+            dict_count(filtered_events_num, 'invalid title')
+            continue
+
+        # filtering: skip all-day events
+        if event['start'].get('dateTime') is None:
+            dict_count(filtered_events_num, 'all-day')
+            continue
+
+        # filtering: year 0 is out of range
+        created = event['created']
+        if '0000' == created[:4] or '1900' == created[:4]:
+            dict_count(filtered_events_num, 'year 0 or 1900')
+            continue
+
+        register_dt = parse(created)
+
+        start = event['start'].get('dateTime', event['start'].get('date'))
+        start_dt = parse(start)
+
+        # filtering: a past
+        if start_dt.toordinal() < register_dt.toordinal():
+            dict_count(filtered_events_num, 'past')
+            continue
+
+        end = event['end'].get('dateTime', event['end'].get('date'))
+        end_dt = parse(end)
+
+        # filtering: phone call or too long duration
+        duration = end_dt - start_dt
+        if not is_valid_duration(duration):
+            dict_count(filtered_events_num, 'invalid duration')
+            continue
+
+        start_iso_year, start_iso_week_num, _ = \
+            date(start_dt.year, start_dt.month, start_dt.day).isocalendar()
+
+        yw = start_iso_year * 100 + start_iso_week_num
+        if yw in valid_week_evt_cnt_dict:
+            valid_week_evt_cnt_dict[yw] += 1
+        else:
+            valid_week_evt_cnt_dict[yw] = 1
+
+        week_register_sequence = week_sequence_dict.get(
+            (start_iso_year, start_iso_week_num))
+        if week_register_sequence is None:
+            week_register_sequence = 0  # start with 0
+        else:
+            week_register_sequence += 1
+        week_sequence_dict[(start_iso_year, start_iso_week_num)] = \
+            week_register_sequence
+
+        register_start_week_distance = get_week_distance(
+            register_dt, start_dt)
+        day_distance = \
+            date(start_dt.year, start_dt.month, start_dt.day) - \
+            date(register_dt.year, register_dt.month, register_dt.day)
+
+        recurring_event_id = event.get('recurringEventId')
+        is_recurrent = recurring_event_id is not None
+
+        # y
+        start_time_slot = \
+            start_dt.minute // MINUTE_NORM \
+            + start_dt.hour * int(60 / MINUTE_NORM) \
+            + start_dt.weekday() * int((60 * 24) / MINUTE_NORM)
+
+        # If you change the order of event features,
+        # check itemgetter parameters below.
+        evt_features = list()
+        evt_features.append(primary_calendar_id)  # originally, user id
+        # evt_features.append(event['iCalUID'])
+
+        # title, duration, register time, start time
+        evt_features.append(event['summary'])
+        evt_features.append(duration.seconds // 60)  # minute
+        evt_features.append(register_dt)
+        evt_features.append(start_dt)
+
+        # sort by year, week, register sequence in a week
+        evt_features.append(start_iso_year)
+        evt_features.append(start_iso_week_num)
+        evt_features.append(week_register_sequence)
+
+        # distance between register and start
+        evt_features.append(register_start_week_distance)
+        evt_features.append(day_distance.days)
+
+        # is recurrent?
+        evt_features.append(is_recurrent)
+
+        # y
+        evt_features.append(start_time_slot)
+
+        valid_events.append(evt_features)
+
+        if print_valid_events:
+            print(evt_features)
 
     print('\n#events', num_events)
     print('#valid_events', len(valid_events))
@@ -352,7 +364,7 @@ def main():
         output_file, sorted(valid_events, key=itemgetter(start_year_idx,
                                                          start_week_idx,
                                                          reg_seq_idx)))
-    print('Saved a file:', output_file)
+    print('Saved', output_file)
 
 
 if __name__ == '__main__':
