@@ -19,6 +19,8 @@ class NETS(nn.Module):
         self.n_classes = config.slot_size // config.class_div
         self.n_day_slots = self.n_classes // 7
 
+        self.cuda_is_available = torch.cuda.is_available()
+
         # embedding layers
         self.char_embed = nn.Embedding(config.char_vocab_size,
                                        config.char_embed_dim,
@@ -35,8 +37,10 @@ class NETS(nn.Module):
         if not config.no_snapshot:
             self.slot_embed = nn.Embedding(self.n_classes,
                                            config.slot_embed_dim)
-            self.emtpy_long = Variable(torch.cuda.LongTensor([]))
-        
+            self.emtpy_long = Variable(torch.cuda.LongTensor([])
+                                       if self.cuda_is_available
+                                       else torch.LongTensor([]))
+
         # dimensions according to settings
         self.num_directions = config.num_directions
         self.t_rnn_idim = config.word_embed_dim + sum(config.tc_conv_fn)
@@ -45,7 +49,9 @@ class NETS(nn.Module):
         if not config.no_snapshot and not config.no_snapshot_title:
             self.sm_conv1_idim += config.st_rnn_hdim * self.num_directions
             self.empty_st_rnn_output = Variable(torch.zeros(
-                    1, self.config.st_rnn_hdim * self.num_directions).cuda())
+                    1, self.config.st_rnn_hdim * self.num_directions))
+            if self.cuda_is_available:
+                self.empty_st_rnn_output = self.empty_st_rnn_output.cuda()
         self.sm_conv2_idim = sum(config.sm_conv_fn[:len(config.sm_conv_fn)//2])
 
         self.it_idim = config.user_embed_dim + config.dur_embed_dim
@@ -95,7 +101,7 @@ class NETS(nn.Module):
         self.batch_first = False
         self.bidirectional = config.num_directions == 2
 
-        if 'lstm' == config.t_st_rnn_type:
+        if 'lstm' == config.rnn_type:
             if not config.no_title:
                 self.t_rnn = nn.LSTM(self.t_rnn_idim, config.t_rnn_hdim,
                                      config.t_rnn_ln,
@@ -109,7 +115,7 @@ class NETS(nn.Module):
                                       dropout=config.st_rnn_dr,
                                       batch_first=self.batch_first,
                                       bidirectional=self.bidirectional)
-        elif 'gru' == config.t_st_rnn_type:
+        elif 'gru' == config.rnn_type:
             if not config.no_title:
                 self.t_rnn = nn.GRU(self.t_rnn_idim, config.t_rnn_hdim,
                                     config.t_rnn_ln,
@@ -123,7 +129,7 @@ class NETS(nn.Module):
                                      batch_first=self.batch_first,
                                      bidirectional=self.bidirectional)
         else:
-            raise ValueError('Invalid RNN: %s' % config.t_st_rnn_type)
+            raise ValueError('Invalid RNN: %s' % config.rnn_type)
 
         # linear layers
         if not config.no_intention:
@@ -199,38 +205,23 @@ class NETS(nn.Module):
             linear_init_uniform(self.mt_gate, stdv_power=stdv_pow)
             linear_init_uniform(self.output_fc1, stdv_power=stdv_pow)
 
-    def init_t_rnn_h(self, batch_size):
-        if 'lstm' == self.config.t_st_rnn_type:
-            return (Variable(
-                        torch.zeros(self.config.t_rnn_ln * self.num_directions,
-                                    batch_size, self.config.t_rnn_hdim).cuda()),
-                    Variable(
-                        torch.zeros(self.config.t_rnn_ln * self.num_directions,
-                                    batch_size, self.config.t_rnn_hdim).cuda()))
-        elif 'gru' == self.config.t_st_rnn_type:
-            return Variable(
-                        torch.zeros(self.config.t_rnn_ln * self.num_directions,
-                                    batch_size, self.config.t_rnn_hdim).cuda())
-        else:
-            raise ValueError('Invalid RNN: %s' % self.config.t_st_rnn_type)
+    def init_rnn_h(self, batch_size, rnn_ln, hdim):
+        h_0 = Variable(torch.zeros(rnn_ln * self.num_directions,
+                                   batch_size, hdim))
+        if self.cuda_is_available:
+            h_0 = h_0.cuda()
 
-    def init_st_rnn_h(self, batch_size):
-        if 'lstm' == self.config.t_st_rnn_type:
-            return (Variable(
-                        torch.zeros(self.config.st_rnn_ln * self.num_directions,
-                                    batch_size,
-                                    self.config.st_rnn_hdim).cuda()),
-                    Variable(
-                        torch.zeros(self.config.st_rnn_ln * self.num_directions,
-                                    batch_size,
-                                    self.config.st_rnn_hdim).cuda()))
-        elif 'gru' == self.config.t_st_rnn_type:
-            return Variable(
-                        torch.zeros(self.config.st_rnn_ln * self.num_directions,
-                                    batch_size, self.config.st_rnn_hdim).cuda())
-
+        if 'lstm' == self.config.rnn_type:
+            c_0 = Variable(
+                        torch.zeros(rnn_ln * self.num_directions,
+                                    batch_size, hdim))
+            if self.cuda_is_available:
+                c_0 = c_0.cuda()
+            return h_0, c_0
+        elif 'gru' == self.config.rnn_type:
+            return h_0
         else:
-            raise ValueError('Invalid RNN: %s' % self.config.t_st_rnn_type)
+            raise ValueError('Invalid RNN: %s' % self.config.rnn_type)
 
     def model_params(self, debug=True):
         print('model parameters: ', end='')
@@ -254,11 +245,12 @@ class NETS(nn.Module):
 
     def get_rnn_out(self, batch_size, batch_max_seqlen, tl,
                     packed_lstm_input, idx_unsort,
-                    init_rnn_h, rnn, rnn_hdim, rnn_out_dr):
+                    rnn, rnn_hdim, rnn_out_dr, rnn_ln):
         assert idx_unsort is not None
 
         # rnn
-        rnn_out, (ht, ct) = rnn(packed_lstm_input, init_rnn_h(batch_size))
+        rnn_out, (ht, ct) = rnn(packed_lstm_input,
+                                self.init_rnn_h(batch_size, rnn_ln, rnn_hdim))
 
         # hidden state could be used for single layer rnn
         if rnn.num_layers == 1:
@@ -287,11 +279,14 @@ class NETS(nn.Module):
 
         # flatten
         # (B * L, rnn_hidden_size * num_directions)
-        rnn_out = rnn_out.view(-1, rnn_hdim * self.num_directions).cuda()
+        rnn_out = rnn_out.view(-1, rnn_hdim * self.num_directions)
+        if self.cuda_is_available:
+            rnn_out = rnn_out.cuda()
 
         # select timestep by length
-        fw_idxes = (torch.arange(0, batch_size).type(
-            torch.cuda.LongTensor) * batch_max_seqlen + tl.data - 1).cuda()
+        fw_idxes = torch.arange(0, batch_size).type(
+            torch.cuda.LongTensor if self.cuda_is_available
+            else torch.LongTensor) * batch_max_seqlen + tl.data - 1
 
         selected_fw = rnn_out[fw_idxes]
         selected_fw = selected_fw[:, :rnn_hdim]
@@ -299,8 +294,9 @@ class NETS(nn.Module):
         # https://github.com/pytorch/pytorch/issues/3587#issuecomment-348340401
         # https://github.com/pytorch/pytorch/issues/3587#issuecomment-354284160
         if rnn.bidirectional:
-            bw_idxes = (torch.arange(0, batch_size).type(
-                torch.cuda.LongTensor) * batch_max_seqlen).cuda()
+            bw_idxes = torch.arange(0, batch_size).type(
+                torch.cuda.LongTensor if self.cuda_is_available
+                else torch.LongTensor) * batch_max_seqlen
 
             selected_bw = rnn_out[bw_idxes]
             selected_bw = selected_bw[:, rnn_hdim:]
@@ -316,7 +312,8 @@ class NETS(nn.Module):
     @profile(__name__)
     def title_layer(self, tc, tw, tl, mode='t'):
         # it's snapshot size if mode='st'
-        tl = Variable(torch.cuda.LongTensor(tl))
+        tl = Variable(torch.cuda.LongTensor(tl) if self.cuda_is_available
+                      else torch.LongTensor(tl))
         batch_size = tl.size(0)
         batch_max_seqlen = tl.data.max()
         batch_max_wordlen = -1
@@ -336,19 +333,28 @@ class NETS(nn.Module):
         tc_tensor = Variable(
             torch.ones((batch_size,
                         batch_max_seqlen,
-                        batch_max_wordlen)).long().cuda())
+                        batch_max_wordlen)).long())
+        if self.cuda_is_available:
+            tc_tensor = tc_tensor.cuda()
         for b_idx, (seq, seqlen) in enumerate(zip(tc, tl.data)):
             for w_idx in range(seqlen):
                 word_chars = seq[w_idx]
                 tc_tensor[b_idx, w_idx, :len(word_chars)] = \
-                    torch.cuda.LongTensor(word_chars)
+                    torch.cuda.LongTensor(word_chars) \
+                    if self.cuda_is_available \
+                    else torch.LongTensor(word_chars)
 
         # assure word2idx[self.PAD] is 1 -> torch.ones()
         # (B, L)
         tw_tensor = Variable(
-            torch.ones((batch_size, batch_max_seqlen)).long().cuda())
+            torch.ones((batch_size, batch_max_seqlen)).long())
+        if self.cuda_is_available:
+            tw_tensor = tw_tensor.cuda()
         for idx, (seq, seqlen) in enumerate(zip(tw, tl.data)):
-            tw_tensor[idx, :seqlen] = torch.cuda.LongTensor(seq[:seqlen])
+            tw_tensor[idx, :seqlen] = \
+                torch.cuda.LongTensor(seq[:seqlen]) \
+                if self.cuda_is_available \
+                else torch.LongTensor(seq[:seqlen])
 
         # sort tc_tensor and tw_tensor by seq len
         tl, perm_idxes = tl.sort(dim=0, descending=True)
@@ -408,18 +414,20 @@ class NETS(nn.Module):
             assert not self.config.no_title
             return self.get_rnn_out(batch_size, batch_max_seqlen, tl,
                                     packed_lstm_input, idx_unsort,
-                                    self.init_t_rnn_h, self.t_rnn,
+                                    self.t_rnn,
                                     self.config.t_rnn_hdim,
-                                    self.config.t_rnn_out_dr)
+                                    self.config.t_rnn_out_dr,
+                                    self.config.t_rnn_ln)
         # for snapshot title
         elif mode == 'st':
             assert not self.config.no_snapshot \
                    and not self.config.no_snapshot_title
             return self.get_rnn_out(batch_size, batch_max_seqlen, tl,
                                     packed_lstm_input, idx_unsort,
-                                    self.init_st_rnn_h, self.st_rnn,
+                                    self.st_rnn,
                                     self.config.st_rnn_hdim,
-                                    self.config.st_rnn_out_dr)
+                                    self.config.st_rnn_out_dr,
+                                    self.config.st_rnn_ln)
         else:
             raise ValueError('Invalid mode %s' % mode)
 
@@ -478,10 +486,21 @@ class NETS(nn.Module):
                 #     snapshot_rep_list.append(
                 #         Variable(torch.zeros(1, self.snapshot_odim).cuda()))
                 # else:
-                dur = self.emtpy_long if 0 == len(dur) \
-                    else Variable(torch.cuda.LongTensor(dur))
-                slot = self.emtpy_long if 0 == len(slot) \
-                    else Variable(torch.cuda.LongTensor(slot))
+
+                if 0 == len(dur):
+                    dur = self.emtpy_long
+                else:
+                    dur = Variable(torch.cuda.LongTensor(dur)
+                                   if self.cuda_is_available
+                                   else torch.LongTensor(dur))
+
+                if 0 == len(slot):
+                    slot = self.emtpy_long
+                else:
+                    slot = Variable(torch.cuda.LongTensor(slot)
+                                    if self.cuda_is_available
+                                    else torch.LongTensor(slot))
+
                 usr_emb = torch.unsqueeze(usr_emb, 0)
                 snapshot_rep, _ = \
                     self.snapshot_layer_core(usr_emb, title, dur, slot)
@@ -492,10 +511,21 @@ class NETS(nn.Module):
                 #     snapshot_rep_list.append(
                 #         Variable(torch.zeros(1, self.snapshot_odim).cuda()))
                 # else:
-                dur = self.emtpy_long if 0 == len(dur) \
-                    else Variable(torch.cuda.LongTensor(dur))
-                slot = self.emtpy_long if 0 == len(slot) \
-                    else Variable(torch.cuda.LongTensor(slot))
+
+                if 0 == len(dur):
+                    dur = self.emtpy_long
+                else:
+                    dur = Variable(torch.cuda.LongTensor(dur)
+                                   if self.cuda_is_available
+                                   else torch.LongTensor(dur))
+
+                if 0 == len(slot):
+                    slot = self.emtpy_long
+                else:
+                    slot = Variable(torch.cuda.LongTensor(slot)
+                                    if self.cuda_is_available
+                                    else torch.LongTensor(slot))
+
                 usr_emb = torch.unsqueeze(usr_emb, 0)
                 snapshot_rep, _ = \
                     self.snapshot_layer_core(usr_emb, None, dur, slot)
@@ -531,7 +561,9 @@ class NETS(nn.Module):
                             new_title.append(title[i])
                 new_slot = np.array(new_slot)
                 saved_slot = new_slot[:]
-                new_slot = Variable(torch.LongTensor(new_slot).cuda())
+                new_slot = Variable(torch.cuda.LongTensor(new_slot)
+                                    if self.cuda_is_available
+                                    else torch.LongTensor(new_slot))
                 new_title = \
                     torch.cat(new_title, 0).\
                     view(-1, self.config.st_rnn_hdim * self.num_directions)
@@ -559,7 +591,9 @@ class NETS(nn.Module):
                             new_slot.append(s + k + 1)
                 new_slot = np.array(new_slot)
                 saved_slot = new_slot[:]
-                new_slot = Variable(torch.LongTensor(new_slot).cuda())
+                new_slot = Variable(torch.cuda.LongTensor(new_slot)
+                                    if self.cuda_is_available
+                                    else torch.LongTensor(new_slot))
                 slot_embed = F.dropout(self.slot_embed(new_slot),
                                        p=self.config.slot_dr,
                                        training=self.training)
@@ -570,10 +604,14 @@ class NETS(nn.Module):
                 snapshot_contents = \
                     torch.cat((user_src_embed.data, slot_embed.data), 1)
 
-        saved_slot = Variable(torch.LongTensor(saved_slot).cuda())
+        saved_slot = Variable(torch.cuda.LongTensor(saved_slot)
+                              if self.cuda_is_available
+                              else torch.LongTensor(saved_slot))
 
         # ready for slot, user embed (base)
-        slot_all = Variable(torch.arange(0, total_slots).long().cuda())
+        slot_all = Variable(torch.arange(0, total_slots).long())
+        if self.cuda_is_available:
+            slot_all = slot_all.cuda()
         slot_all_embed = self.slot_embed(slot_all)
         user_all_embed = user_embed[0].expand(slot_all_embed.size(0),
                                               user_embed.size(1))
@@ -582,7 +620,9 @@ class NETS(nn.Module):
             zero_concat = \
                 torch.zeros(
                     total_slots,
-                    self.config.st_rnn_hdim * self.num_directions).cuda()
+                    self.config.st_rnn_hdim * self.num_directions)
+            if self.cuda_is_available:
+                zero_concat = zero_concat.cuda()
             snapshot_base = torch.cat((zero_concat, user_all_embed.data,
                                        slot_all_embed.data), 1)
         else:
@@ -591,7 +631,9 @@ class NETS(nn.Module):
 
         # ready for snapshot map (empty)
         snapshot_map = \
-            Variable(torch.zeros(total_slots, self.sm_conv1_idim).cuda())
+            Variable(torch.zeros(total_slots, self.sm_conv1_idim))
+        if self.cuda_is_available:
+            snapshot_map = snapshot_map.cuda()
 
         index = None
         if len(dur.size()) > 0:
@@ -619,10 +661,13 @@ class NETS(nn.Module):
         # multiple filter conv
         conv_list = [self.sm_conv1, self.sm_conv2]
         snapshot_mf = torch.unsqueeze(snapshot_map, 0)
+        if self.cuda_is_available:
+            snapshot_mf = snapshot_mf.cuda()
+
         for layer_idx, sm_conv in enumerate(conv_list):
             conv_result = list()
             for filter_idx, conv in enumerate(sm_conv):
-                conv_out = conv(snapshot_mf.cuda())
+                conv_out = conv(snapshot_mf)
                 conv_result.append(conv_out)
             snapshot_mf = torch.cat(conv_result, 1)
             if layer_idx < len(conv_list) - 1:
@@ -638,7 +683,9 @@ class NETS(nn.Module):
         # Highway network for mf
         concat_seq = list()
         if not self.config.no_snapshot:
-            concat_seq.append(Variable(grid).cuda())
+            if self.cuda_is_available:
+                grid = grid.cuda()
+            concat_seq.append(Variable(grid))
             concat_seq.insert(0, snapshot_mf)
         if not self.config.no_intention:
             concat_seq.insert(0, intention)
@@ -684,8 +731,12 @@ class NETS(nn.Module):
 
         user_embed = None
         if not self.config.no_intention or not self.config.no_snapshot:
-            user_embed = self.user_embed(Variable(user).cuda())
-            # user_embed = Variable(torch.zeros(user_embed.size()).cuda())
+            if self.cuda_is_available:
+                user = user.cuda()
+
+            user_embed = self.user_embed(Variable(user))
+            # user_embed = Variable(torch.zeros(user_embed.size()))
+
             if self.config.user_dr > 0:
                 user_embed = F.dropout(user_embed,
                                        p=self.config.user_dr,
@@ -693,8 +744,12 @@ class NETS(nn.Module):
 
         intention_rep = None
         if not self.config.no_intention:
-            dur_embed = self.dur_embed(Variable(dur).cuda())
-            # dur_embed = Variable(torch.zeros(dur_embed.size()).cuda())
+            if self.cuda_is_available:
+                dur = dur.cuda()
+
+            dur_embed = self.dur_embed(Variable(dur))
+            # dur_embed = Variable(torch.zeros(dur_embed.size()))
+
             if self.config.dur_dr > 0:
                 dur_embed = F.dropout(dur_embed,
                                       p=self.config.dur_dr,
@@ -831,15 +886,17 @@ class NETS(nn.Module):
             filename = os.path.join(self.config.checkpoint_dir,
                                     filename + '.pth')
         print('\t=> save checkpoint %s' % filename)
+        if not os.path.exists(self.config.checkpoint_dir):
+            os.mkdir(self.config.checkpoint_dir)
         torch.save(state, filename)
 
-    def load_checkpoint(self, filename=None):
+    def load_checkpoint(self, filename=None, map_location=None):
         if filename is None:
             filename = self.config.checkpoint_dir + self.config.model_name
         else:
             filename = self.config.checkpoint_dir + filename
         print('\t=> load checkpoint %s' % filename)
-        checkpoint = torch.load(filename)
+        checkpoint = torch.load(filename, map_location=map_location)
         self.load_state_dict(checkpoint['state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
         # self.config = checkpoint['config']
@@ -855,14 +912,14 @@ class NETS(nn.Module):
         else:
             raise ValueError('Invalid mode %s' % mode)
 
-        writer.add_scalar('%s/loss' % mode, metrics[0], offset)
-        writer.add_scalar('%s/recall@1' % mode, metrics[1], offset)
-        writer.add_scalar('%s/recall@5' % mode, metrics[2], offset)
-        writer.add_scalar('%s/recall@10' % mode, metrics[3], offset)
-        writer.add_scalar('%s/mrr' % mode, metrics[4], offset)
-        writer.add_scalar('%s/ieuc' % mode, metrics[5], offset)
-        writer.add_scalar('%s/ndcg@5' % mode, metrics[6], offset)
-        writer.add_scalar('%s/ndcg@10' % mode, metrics[7], offset)
+        writer.add_scalar('loss', metrics[0], offset)
+        writer.add_scalar('recall@1', metrics[1], offset)
+        writer.add_scalar('recall@5', metrics[2], offset)
+        writer.add_scalar('recall@10', metrics[3], offset)
+        writer.add_scalar('mrr', metrics[4], offset)
+        writer.add_scalar('ieuc', metrics[5], offset)
+        writer.add_scalar('ndcg@5', metrics[6], offset)
+        writer.add_scalar('ndcg@10', metrics[7], offset)
 
         for name, param in self.named_parameters():
             if not param.requires_grad:

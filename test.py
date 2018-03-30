@@ -1,6 +1,5 @@
 import argparse
 import dataset
-# from dataset import NETSDataset, Config
 from model import NETS
 import numpy as np
 import os
@@ -10,31 +9,40 @@ import torch
 from torch.autograd import Variable
 
 
-def get_dataset(_config, pretrained_dict_path):
+def get_dataset(_config, trained_dict_path):
     print('Creating the test dataset pickle..', )
-    nets_dictionary = pickle.load(open(pretrained_dict_path, 'rb'))
-    _test_dataset = dataset.NETSDataset(_config, nets_dictionary)
-    if len(_test_dataset.test_data) == 0:
+    nets_dictionary = pickle.load(open(trained_dict_path, 'rb'))
+    test_set = dataset.NETSDataset(_config, nets_dictionary)
+    if len(test_set.test_data) == 0:
         print('no events')
         return None
-    pickle.dump(_test_dataset, open(_config.preprocess_save_path, 'wb'))
-    return _test_dataset
+    pickle.dump(test_set, open(_config.preprocess_save_path, 'wb'))
+    return test_set
 
 
 def get_model(widx2vec, model_path):
     model_dir, model_filename = os.path.split(model_path)
-    checkpoint = torch.load(model_path)
+    checkpoint = torch.load(model_path,
+                            map_location=None if torch.cuda.is_available()
+                            else 'cpu')
     ckpt_config = checkpoint['config']
+    ckpt_dict = vars(ckpt_config)
+    ckpt_dict['rnn_type'] = 'lstm'  # to be deleted
 
-    _model = NETS(ckpt_config, widx2vec).cuda()
-    _model.config.checkpoint_dir = model_dir + '/'
-    _model.load_checkpoint(filename=model_filename)
+    model = NETS(ckpt_config, widx2vec)
+    if torch.cuda.is_available():
+        model = model.cuda()
+    model.config.checkpoint_dir = model_dir + '/'
+    model.load_checkpoint(filename=model_filename,
+                          map_location=None
+                          if torch.cuda.is_available()
+                          else 'cpu')
     # import pprint
     # pprint.PrettyPrinter().pprint(_model.config.__dict__)
-    return _model
+    return model
 
 
-def measure_performance(_dataset, _nets_model, batch_size=1):
+def measure_performance(test_set, model, batch_size=1):
     performance_dict = dict()
     performance_dict['recall1'] = 0.
     performance_dict['recall5'] = 0.
@@ -43,12 +51,15 @@ def measure_performance(_dataset, _nets_model, batch_size=1):
     performance_dict['count'] = 0
     performance_dict['steps'] = 0.
 
-    _, _, test_loader = _dataset.get_dataloader(batch_size=batch_size)
+    cuda_is_available = torch.cuda.is_available()
+
+    _, _, test_loader = test_set.get_dataloader(batch_size=batch_size)
     for d_idx, ex in enumerate(test_loader):
-        outputs, reps = _nets_model(*ex[:-1])
-        metrics = _nets_model.get_metrics(outputs,
-                                          Variable(ex[-1]).cuda(),
-                                          ex[-2])
+        labels = Variable(ex[-1])
+        if cuda_is_available:
+            labels = labels.cuda()
+        outputs, reps = model(*ex[:-1])
+        metrics = model.get_metrics(outputs, labels, ex[-2])
 
         performance_dict['recall1'] += metrics[0]
         performance_dict['recall5'] += metrics[1]
@@ -90,7 +101,7 @@ if __name__ == '__main__':
                             default='./data/preprocess(test).pkl')
     arg_parser.add_argument("--model_path", type=str,
                             default='./data/pack3_1.pth')
-    arg_parser.add_argument("--pretrained_dict_path", type=str,
+    arg_parser.add_argument("--trained_dict_path", type=str,
                             default='./data/nets_k1k2_grid_dict.pkl')
     arg_parser.add_argument("--seed", type=int, default=3)
     args = arg_parser.parse_args()
@@ -103,7 +114,7 @@ if __name__ == '__main__':
     config.preprocess_load_path = args.serialized_data_path
 
     print('Loading test dataset..')
-    test_dataset = get_dataset(config, args.pretrained_dict_path)
+    test_dataset = get_dataset(config, args.trained_dict_path)
     assert test_dataset is not None
 
     print('Loading NETS model..')
