@@ -106,6 +106,10 @@ if __name__ == '__main__':
     arg_parser.add_argument("--seed", type=int, default=3)
     args = arg_parser.parse_args()
 
+    if torch.cuda.is_available():
+        print('CUDA device_count {0}'.format(torch.cuda.device_count())
+              if torch.cuda.is_available() else 'CPU')
+
     set_seed_all(args.seed)
 
     config = dataset.Config()
