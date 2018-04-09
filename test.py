@@ -39,6 +39,7 @@ def get_model(widx2vec, model_path):
                           else 'cpu')
     # import pprint
     # pprint.PrettyPrinter().pprint(_model.config.__dict__)
+    model = model.eval()
     return model
 
 
