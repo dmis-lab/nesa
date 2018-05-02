@@ -4,7 +4,7 @@ import time
 PROF_DATA = {}
 
 
-class profile(object):
+class Profile(object):
     def __init__(self, prefix):
         self.prefix = prefix
 

@@ -6,44 +6,37 @@ import os
 import pickle
 import random
 import torch
-from torch.autograd import Variable
 
 
-def get_dataset(_config, trained_dict_path):
+def get_dataset(cfg, trained_dict_path):
     print('Creating the test dataset pickle..', )
     nets_dictionary = pickle.load(open(trained_dict_path, 'rb'))
-    test_set = dataset.NETSDataset(_config, nets_dictionary)
+    test_set = dataset.NETSDataset(cfg, nets_dictionary)
     if len(test_set.test_data) == 0:
         print('no events')
         return None
-    pickle.dump(test_set, open(_config.preprocess_save_path, 'wb'))
+    pickle.dump(test_set, open(cfg.preprocess_save_path, 'wb'))
     return test_set
 
 
-def get_model(widx2vec, model_path):
+def get_model(widx2vec, model_path, dvc, arg):
     model_dir, model_filename = os.path.split(model_path)
     checkpoint = torch.load(model_path,
-                            map_location=None if torch.cuda.is_available()
-                            else 'cpu')
+                            map_location=None if 'cuda' == dvc.type else 'cpu')
     ckpt_config = checkpoint['config']
     ckpt_dict = vars(ckpt_config)
-    ckpt_dict['rnn_type'] = 'lstm'  # to be deleted
+    ckpt_dict['yes_cuda'] = arg.yes_cuda  # overriding
 
-    model = NETS(ckpt_config, widx2vec)
-    if torch.cuda.is_available():
-        model = model.cuda()
+    model = NETS(ckpt_config, widx2vec).to(dvc)
     model.config.checkpoint_dir = model_dir + '/'
     model.load_checkpoint(filename=model_filename,
-                          map_location=None
-                          if torch.cuda.is_available()
-                          else 'cpu')
+                          map_location=None if 'cuda' == dvc.type else 'cpu')
     # import pprint
     # pprint.PrettyPrinter().pprint(_model.config.__dict__)
-    model = model.eval()
     return model
 
 
-def measure_performance(test_set, model, batch_size=1):
+def measure_performance(test_set, model, dvc, batch_size=1):
     performance_dict = dict()
     performance_dict['recall1'] = 0.
     performance_dict['recall5'] = 0.
@@ -52,13 +45,12 @@ def measure_performance(test_set, model, batch_size=1):
     performance_dict['count'] = 0
     performance_dict['steps'] = 0.
 
-    cuda_is_available = torch.cuda.is_available()
+    model = model.eval()
+    torch.set_grad_enabled(False)
 
     _, _, test_loader = test_set.get_dataloader(batch_size=batch_size)
     for d_idx, ex in enumerate(test_loader):
-        labels = Variable(ex[-1])
-        if cuda_is_available:
-            labels = labels.cuda()
+        labels = ex[-1].to(dvc)
         outputs, reps = model(*ex[:-1])
         metrics = model.get_metrics(outputs, labels, ex[-2])
 
@@ -99,17 +91,20 @@ if __name__ == '__main__':
     arg_parser.add_argument("--input_path", type=str,
                             default='./data/sample_data.csv')
     arg_parser.add_argument("--serialized_data_path", type=str,
-                            default='./data/preprocess(test).pkl')
+                            default='./data/preprocess_test.pkl')
     arg_parser.add_argument("--model_path", type=str,
-                            default='./data/pack3_1.pth')
+                            default='./data/nets_gradclip_180501_5_1.pth')
     arg_parser.add_argument("--trained_dict_path", type=str,
-                            default='./data/nets_k1k2_grid_dict.pkl')
+                            default='./data/preprocess_20180429_dict.pkl')
     arg_parser.add_argument("--seed", type=int, default=3)
+    arg_parser.add_argument('--yes_cuda', type=int, default=1)
     args = arg_parser.parse_args()
 
-    if torch.cuda.is_available():
-        print('CUDA device_count {0}'.format(torch.cuda.device_count())
-              if torch.cuda.is_available() else 'CPU')
+    use_cuda = args.yes_cuda > 0 and torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+
+    print('CUDA device_count {0}'.format(torch.cuda.device_count())
+          if use_cuda else 'CPU')
 
     set_seed_all(args.seed)
 
@@ -123,7 +118,7 @@ if __name__ == '__main__':
     assert test_dataset is not None
 
     print('Loading NETS model..')
-    nets_model = get_model(test_dataset.widx2vec, args.model_path)
+    nets_model = get_model(test_dataset.widx2vec, args.model_path, device, args)
 
     print('\nMeasuring NETS performance on test data..')
-    measure_performance(test_dataset, nets_model)
+    measure_performance(test_dataset, nets_model, device)

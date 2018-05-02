@@ -1,17 +1,18 @@
+import csv
 import math
+import nltk
 import numpy as np
 import os
-import csv
 import pprint
 import pickle
-import nltk
 import string
 import torch
 
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
 
-nltk.download('punkt')
+if not os.path.exists(os.path.join(os.path.expanduser('~'), 'nltk_data')):
+    nltk.download('punkt')
 
 
 class NETSDataset(object):
@@ -88,14 +89,10 @@ class NETSDataset(object):
         self.idx2user = {}
         self.dur2idx = {}
         self.idx2dur = {}
-        self.char2idx[self.UNK] = 0
-        self.char2idx[self.PAD] = 1
-        self.idx2char[0] = self.UNK
-        self.idx2char[1] = self.PAD
-        self.word2idx[self.UNK] = 0
-        self.word2idx[self.PAD] = 1
-        self.idx2word[0] = self.UNK
-        self.idx2word[1] = self.PAD
+        self.char2idx[self.PAD] = self.word2idx[self.PAD] = 0
+        self.char2idx[self.UNK] = self.word2idx[self.UNK] = 1
+        self.idx2char[0] = self.idx2word[0] = self.PAD
+        self.idx2char[1] = self.idx2word[1] = self.UNK
         self.user2idx[self.UNK] = 0
         self.idx2user[0] = self.UNK
         self.dur2idx[self.UNK] = 0
@@ -130,7 +127,8 @@ class NETSDataset(object):
         output = []
         for key in key_list:
             if key in dictionary:
-                if reverse and key == 1:  # skip PAD for reverse
+                # skip PAD for reverse
+                if reverse and key == self.word2idx[self.PAD]:
                     continue
                 else:
                     output.append(dictionary[key])
@@ -138,7 +136,7 @@ class NETSDataset(object):
                 if not reverse:
                     output.append(dictionary[self.UNK])
                 else:
-                    output.append(dictionary[0])
+                    output.append(dictionary[self.word2idx[self.UNK]])
         return output
     
     def build_word_dict(self, path, update=True):
@@ -235,11 +233,12 @@ class NETSDataset(object):
                     widx2vec.append(word2vec[word])
                 else:
                     unk_cnt += 1
+
+        self.widx2vec = widx2vec
+
         print('pretrained vectors', np.asarray(widx2vec).shape, 'unk', unk_cnt)
         print('dictionary change', len(self.initial_word_dict),
               'to', len(self.word2idx), len(self.idx2word), end='\n\n')
-
-        self.widx2vec = widx2vec
 
     def process_data(self, path, update_dict=False):
         print('### processing %s' % path)
@@ -490,28 +489,48 @@ class NETSDataset(object):
         return train_loader, valid_loader, test_loader
 
     def batchify(self, batch):
-        users = torch.cat([ex[0] for ex in batch])
-        durs = torch.cat([ex[1] for ex in batch])
-        tcs = [ex[2] for ex in batch]
-        tws = [ex[3] for ex in batch]
-        tls = [ex[4] for ex in batch]
-        stcs = [ex[5] for ex in batch]
-        stws = [ex[6] for ex in batch]
-        stls = [ex[7] for ex in batch]
-        sdurs = [ex[8] for ex in batch]
-        sslots = [ex[9] for ex in batch]
-        grids = torch.cat([ex[10].unsqueeze(0) for ex in batch])
-        targets = torch.cat([ex[11] for ex in batch])
+        users = torch.cat([example[0] for example in batch])
+        durs = torch.cat([example[1] for example in batch])
+        tcs = [example[2] for example in batch]
+        tws = [example[3] for example in batch]
+        tls = [example[4] for example in batch]
+        stcs = [example[5] for example in batch]
+        stws = [example[6] for example in batch]
+        stls = [example[7] for example in batch]
+        sdurs = [example[8] for example in batch]
+        sslots = [example[9] for example in batch]
+        grids = torch.cat([example[10].unsqueeze(0) for example in batch])
+        targets = torch.cat([example[11] for example in batch])
 
         return (users, durs, tcs, tws, tls,
                 stcs, stws, stls, sdurs, sslots, grids, targets)
 
+    def get_train_class_counts(self):
+        cnt_list = [0] * (self.slot_size // self.class_div)
+        for td in self.train_data:
+            cnt_list[td[5]] += 1
+
+        assert len(self.train_data) == sum(cnt_list)
+
+        return cnt_list
+
+    def get_class_weights(self):
+        cnt_list = self.get_train_class_counts()
+
+        # http://scikit-learn.org/stable/modules/generated/sklearn.utils.class_weight.compute_class_weight.html
+        n_classes = self.slot_size // self.class_div
+        n_samples = sum(cnt_list)
+
+        assert len(cnt_list) == n_classes
+
+        return [n_samples / (n_classes * cnt) for cnt in cnt_list]
+
 
 class Vectorize(Dataset):
 
-    def __init__(self, examples, config):
+    def __init__(self, examples, cfg):
         self.examples = examples
-        self.config = config
+        self.config = cfg
 
     def __len__(self):
         return len(self.examples)
@@ -562,13 +581,14 @@ class Vectorize(Dataset):
                 return max([s[0][2] for s in snapshots])
             else:
                 return 0
-        return [(ex[1][2], maxlen_from_snapshot(ex[3]))
-                for ex in self.examples]
+        return [(example[1][2], maxlen_from_snapshot(example[3]))
+                for example in self.examples]
 
 
 class SortedBatchSampler(Sampler):
 
     def __init__(self, lengths, batch_size, shuffle=True):
+        super(SortedBatchSampler, self).__init__(None)
         self.lengths = lengths
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -591,14 +611,17 @@ class SortedBatchSampler(Sampler):
 
 class Config(object):
     def __init__(self):
-        self.train_path = './data/train.csv'
-        self.valid_path = './data/valid.csv'
-        self.test_path = './data/test.csv'
+        path_base = './data'
+
+        self.train_path = os.path.join(path_base, 'train.csv')
+        self.valid_path = os.path.join(path_base, 'valid.csv')
+        self.test_path = os.path.join(path_base, 'test.csv')
+        # http://nlp.stanford.edu/data/glove.840B.300d.zip
         self.word2vec_path = \
             os.path.expanduser('~') + '/common/glove/glove.840B.300d.txt'
         self.word2vec_type = 840  # 6 or 840 (B)
         self.word_embed_dim = 300
-        self.batch_size = 32
+        self.batch_size = 16
         self.max_wordlen = 0
         self.max_sentlen = 0
         self.char_vocab_size = 0
@@ -608,11 +631,11 @@ class Config(object):
         self.class_div = 0
         self.slot_size = 0
         self.data_workers = 5
-        self.save_preprocess = True
+        self.save_preprocess = False
         self.sm_day_num = 7
         self.sm_slot_num = 24
-        self.preprocess_save_path = './data/preprocess(tmp).pkl'
-        self.preprocess_load_path = './data/preprocess(k1k2).pkl'
+        self.preprocess_save_path = './data/preprocess_tmp.pkl'
+        self.preprocess_load_path = './data/preprocess_20180429.pkl'
 
 
 if __name__ == '__main__':
@@ -629,6 +652,12 @@ if __name__ == '__main__':
         ([(k, v) for k, v in vars(dataset.config).items() if '__' not in k]))
     print()
 
+    class_counts = dataset.get_train_class_counts()
+    print('class_counts', 'min', min(class_counts), 'max', max(class_counts))
+    w = dataset.get_class_weights()
+    print('class_weights', 'min', min(w), 'max', max(w))
+
     for d_idx, ex in enumerate(dataset.get_dataloader(batch_size=16)[0]):
-        print(d_idx)
+        if d_idx % 100 == 0:
+            print(d_idx)
     print('\niteration test pass!')
