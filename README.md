@@ -49,3 +49,6 @@ $ python3 get_google_calendar_events.py
 ```
 $ python3 test.py --input_path ./data/<primary_calendar_id>_events.csv
 ```
+
+# License
+Apache License 2.0
