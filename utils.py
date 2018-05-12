@@ -27,16 +27,6 @@ class Profile(object):
         return with_profiling
 
 
-def print_prof_data():
-    for fname, data in sorted(PROF_DATA.items()):
-        max_time = max(data[1])
-        avg_time = sum(data[1]) / len(data[1])
-        total_time = sum(data[1])
-        print("\n{} => called {} times.".format(fname, data[0]))
-        print("Time total: {:.3f}, max: {:.3f}, avg: {:.3f}".format(
-            total_time, max_time, avg_time))
-
-
 def clear_prof_data():
     global PROF_DATA
     PROF_DATA = {}

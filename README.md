@@ -15,12 +15,12 @@ $ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/sample_data.csv
 
 # Download word, character dictionaries
 ```
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/preprocess_20180429_dict.pkl
+$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/preprocess_180504_dict.pkl
 ```
 
 # Download pretrained NETS model
 ```
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/nets_gradclip_180501_5_1.pth
+$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/nets_180512_0.pth
 ```
 
 # Run NETS w/ sample data

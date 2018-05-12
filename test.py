@@ -29,8 +29,7 @@ def get_model(widx2vec, model_path, dvc, arg):
 
     model = NETS(ckpt_config, widx2vec).to(dvc)
     model.config.checkpoint_dir = model_dir + '/'
-    model.load_checkpoint(filename=model_filename,
-                          map_location=None if 'cuda' == dvc.type else 'cpu')
+    model.load_checkpoint(filename=model_filename[:-4])  # .pth
     # import pprint
     # pprint.PrettyPrinter().pprint(_model.config.__dict__)
     return model
@@ -52,12 +51,12 @@ def measure_performance(test_set, model, dvc, batch_size=1):
     for d_idx, ex in enumerate(test_loader):
         labels = ex[-1].to(dvc)
         outputs, reps = model(*ex[:-1])
-        metrics = model.get_metrics(outputs, labels, ex[-2])
+        metrics = model.get_metrics(outputs, labels, ex[-2].to(dvc))
 
         performance_dict['recall1'] += metrics[0]
         performance_dict['recall5'] += metrics[1]
-        performance_dict['mrr'] += metrics[3]
-        performance_dict['ieuc'] += metrics[4]
+        performance_dict['mrr'] += metrics[2]
+        performance_dict['ieuc'] += metrics[3]
         performance_dict['count'] += outputs.data.size()[0]
         performance_dict['steps'] += 1.
 
@@ -93,16 +92,15 @@ if __name__ == '__main__':
     arg_parser.add_argument("--serialized_data_path", type=str,
                             default='./data/preprocess_test.pkl')
     arg_parser.add_argument("--model_path", type=str,
-                            default='./data/nets_gradclip_180501_5_1.pth')
+                            default='./data/nets_180512_0.pth')
     arg_parser.add_argument("--trained_dict_path", type=str,
-                            default='./data/preprocess_20180429_dict.pkl')
+                            default='./data/preprocess_180504_dict.pkl')
     arg_parser.add_argument("--seed", type=int, default=3)
     arg_parser.add_argument('--yes_cuda', type=int, default=1)
     args = arg_parser.parse_args()
 
     use_cuda = args.yes_cuda > 0 and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-
     print('CUDA device_count {0}'.format(torch.cuda.device_count())
           if use_cuda else 'CPU')
 
