@@ -10,9 +10,10 @@ from tensorboardX import SummaryWriter
 from utils import Profile
 
 
-class NETS(nn.Module):
-    def __init__(self, config, widx2vec, class_weight=None, idx=None):
-        super(NETS, self).__init__()
+class NESA(nn.Module):
+    def __init__(self, config, widx2vec, idx2dur=None, class_weight=None,
+                 idx=None):
+        super(NESA, self).__init__()
         self.config = config
 
         use_cuda = self.config.yes_cuda > 0 and torch.cuda.is_available()
@@ -34,6 +35,16 @@ class NETS(nn.Module):
                                            config.user_embed_dim)
         if not config.no_intention:
             self.dur_embed = nn.Embedding(config.dur_size, config.dur_embed_dim)
+            if config.use_duration_scala > 0:
+                assert idx2dur is not None
+                self.dur_embed = nn.Embedding(config.dur_size, 1)
+                didx2vec = np.zeros((config.dur_size, 1))
+                for dur_idx in idx2dur:
+                    # zero to one
+                    didx2vec[dur_idx] = min(1., idx2dur[dur_idx] / 720.)
+                self.dur_embed.weight.data.copy_(torch.from_numpy(didx2vec))
+                self.dur_embed.weight.requires_grad = False
+
         if not config.no_context:
             self.slot_embed = nn.Embedding(self.n_classes,
                                            config.slot_embed_dim)
@@ -99,35 +110,19 @@ class NETS(nn.Module):
         self.batch_first = False
         self.bidirectional = config.num_directions == 2
 
-        if 'lstm' == config.rnn_type:
-            if not config.no_title:
-                self.t_rnn = nn.LSTM(self.t_rnn_idim, config.t_rnn_hdim,
-                                     config.t_rnn_ln,
-                                     dropout=config.t_rnn_dr,
-                                     batch_first=self.batch_first,
-                                     bidirectional=self.bidirectional)
+        if not config.no_title:
+            self.t_rnn = nn.LSTM(self.t_rnn_idim, config.t_rnn_hdim,
+                                 config.t_rnn_ln,
+                                 dropout=config.t_rnn_dr,
+                                 batch_first=self.batch_first,
+                                 bidirectional=self.bidirectional)
 
-            if not config.no_context and not config.no_context_title:
-                self.st_rnn = nn.LSTM(self.st_rnn_idim, config.st_rnn_hdim,
-                                      config.st_rnn_ln,
-                                      dropout=config.st_rnn_dr,
-                                      batch_first=self.batch_first,
-                                      bidirectional=self.bidirectional)
-        elif 'gru' == config.rnn_type:
-            if not config.no_title:
-                self.t_rnn = nn.GRU(self.t_rnn_idim, config.t_rnn_hdim,
-                                    config.t_rnn_ln,
-                                    dropout=config.t_rnn_dr,
-                                    batch_first=self.batch_first,
-                                    bidirectional=self.bidirectional)
-            if not config.no_context and not config.no_context_title:
-                self.st_rnn = nn.GRU(self.st_rnn_idim, config.st_rnn_hdim,
-                                     config.st_rnn_ln,
-                                     dropout=config.st_rnn_dr,
-                                     batch_first=self.batch_first,
-                                     bidirectional=self.bidirectional)
-        else:
-            raise ValueError('Invalid RNN: %s' % config.rnn_type)
+        if not config.no_context and not config.no_context_title:
+            self.st_rnn = nn.LSTM(self.st_rnn_idim, config.st_rnn_hdim,
+                                  config.st_rnn_ln,
+                                  dropout=config.st_rnn_dr,
+                                  batch_first=self.batch_first,
+                                  bidirectional=self.bidirectional)
 
         # linear layers
         if not config.no_intention:
@@ -139,12 +134,13 @@ class NETS(nn.Module):
                                     config.sm_day_num * config.sm_slot_num)
 
         # initialization
-        self.init_word_embed(widx2vec)
+        self.init_word_embed(widx2vec,
+                             requires_grad=config.word_embed_req_grad > 0)
         self.init_convs()
         self.init_linears()
 
-        params = self.model_params(debug=False)
-        self.optimizer = optim.Adam(params, lr=config.lr,
+        self.params = self.model_params(debug=False)
+        self.optimizer = optim.Adam(self.params, lr=config.lr,
                                     weight_decay=config.wd,
                                     amsgrad=True)
         self.scheduler = \
@@ -160,9 +156,9 @@ class NETS(nn.Module):
                            ('_%d' % idx if idx is not None else '')
             self.summary_writer = SummaryWriter(log_dir=summary_path)
 
-    def init_word_embed(self, widx2vec):
+    def init_word_embed(self, widx2vec, requires_grad=False):
         self.word_embed.weight.data.copy_(torch.from_numpy(np.array(widx2vec)))
-        self.word_embed.weight.requires_grad = False
+        self.word_embed.weight.requires_grad = requires_grad
 
     def init_convs(self):
         def init_conv_list(conv_list):
@@ -214,17 +210,10 @@ class NETS(nn.Module):
         h_0 = torch.zeros(rnn_ln * self.num_directions,
                           batch_size,
                           hdim).to(self.device)
-
-        if 'lstm' == self.config.rnn_type:
-            c_0 = torch.zeros(rnn_ln * self.num_directions,
-                              batch_size,
-                              hdim).to(self.device)
-
-            return h_0, c_0
-        elif 'gru' == self.config.rnn_type:
-            return h_0
-        else:
-            raise ValueError('Invalid RNN: %s' % self.config.rnn_type)
+        c_0 = torch.zeros(rnn_ln * self.num_directions,
+                          batch_size,
+                          hdim).to(self.device)
+        return h_0, c_0
 
     def model_params(self, debug=True):
         print('model parameters: ', end='')
@@ -247,12 +236,12 @@ class NETS(nn.Module):
         return params
 
     def get_rnn_out(self, batch_size, batch_max_seqlen, tl,
-                    packed_lstm_input, idx_unsort,
+                    packed_input, idx_unsort,
                     rnn, rnn_hdim, rnn_out_dr, rnn_ln):
         assert idx_unsort is not None
 
         # rnn
-        rnn_out, (ht, ct) = rnn(packed_lstm_input,
+        rnn_out, (ht, ct) = rnn(packed_input,
                                 self.init_rnn_h(batch_size, rnn_ln, rnn_hdim))
 
         # hidden state could be used for single layer rnn
@@ -287,7 +276,7 @@ class NETS(nn.Module):
 
         # select timestep by length
         fw_idxes = \
-            torch.arange(0, batch_size, dtype=torch.long)\
+            torch.arange(0, batch_size, dtype=torch.long) \
             .to(self.device) * batch_max_seqlen + tl - 1
 
         selected_fw = rnn_out[fw_idxes]
@@ -315,8 +304,8 @@ class NETS(nn.Module):
     def title_layer(self, tc, tw, tl, mode='t'):
         # it's context size if mode='st'
         tl = torch.LongTensor(tl).to(self.device)
-        batch_size = tl.size(0)
-        batch_max_seqlen = tl.max()
+        batch_size = tl.size(0)  # B
+        batch_max_seqlen = tl.max()  # L
         batch_max_wordlen = -1
         for tc_words in tc:
             for tc_word in tc_words:
@@ -389,6 +378,9 @@ class NETS(nn.Module):
         # word embedding for title
         # (B, L, word_embed_dim)
         tw_embed = self.word_embed(tw_tensor)
+        # # ablation: word embedding
+        # tw_embed = torch.zeros(tw_embed.size()).to(self.device)
+
         if self.config.word_dr > 0:
             tw_embed = F.dropout(tw_embed,
                                  p=self.config.word_dr,
@@ -403,18 +395,17 @@ class NETS(nn.Module):
 
         # concat title character conv result and title word embedding
         # (L, B, sum(tc_conv_fn) + word_embed_dim)
-        lstm_input = torch.cat((conv_result, tw_embed), 2)
+        rnn_input = torch.cat((conv_result, tw_embed), 2)
 
         # pack, response for variable length batch
-        packed_lstm_input = \
-            pack_padded_sequence(lstm_input, tl.tolist(),
-                                 batch_first=self.batch_first)
+        packed_input = \
+            pack_padded_sequence(rnn_input, tl, batch_first=self.batch_first)
 
         # for input title
         if mode == 't':
             assert not self.config.no_title
             return self.get_rnn_out(batch_size, batch_max_seqlen, tl,
-                                    packed_lstm_input, idx_unsort,
+                                    packed_input, idx_unsort,
                                     self.t_rnn,
                                     self.config.t_rnn_hdim,
                                     self.config.t_rnn_out_dr,
@@ -424,7 +415,7 @@ class NETS(nn.Module):
             assert not self.config.no_context \
                    and not self.config.no_context_title
             return self.get_rnn_out(batch_size, batch_max_seqlen, tl,
-                                    packed_lstm_input, idx_unsort,
+                                    packed_input, idx_unsort,
                                     self.st_rnn,
                                     self.config.st_rnn_hdim,
                                     self.config.st_rnn_out_dr,
@@ -440,7 +431,7 @@ class NETS(nn.Module):
         else:
             concat = torch.cat((user, dur), 1)
         nonl = F.rrelu(self.it_nonl(concat))
-        gate = F.sigmoid(self.it_gate(concat))
+        gate = torch.sigmoid(self.it_gate(concat))
         return torch.mul(gate, nonl) + torch.mul(1 - gate, concat)
 
     @Profile(__name__)
@@ -478,7 +469,7 @@ class NETS(nn.Module):
     @Profile(__name__)
     def context_layer(self, user_embed, stitle, sdur, sslot):
         # # test
-        # return torch.zeros(user_embed.size(0), self.context_odim)\
+        # return torch.zeros(user_embed.size(0), self.context_odim) \
         #     .to(self.device)
 
         context_rep_list = list()
@@ -539,17 +530,23 @@ class NETS(nn.Module):
         has_preregistered_events = dur.size(0) > 0
 
         if has_preregistered_events:
+            dur = torch.ceil(dur.float() / (30 * self.config.class_div)) \
+                      .long() - 1
+            new_slot = list()
+
+            assert dur.size(0) == slot.size(0), \
+                'd %d, s %d' % (dur.size(0), slot.size(0))
+
             if not self.config.no_context_title:
                 assert title is not None
                 new_title = list()
-                dur = dur / 30 - 1
-                new_slot = list()
 
-                assert title.size(0) == dur.size(0) == slot.size(0), \
-                    't %d, d %d, s %d' % (
-                    title.size(0), dur.size(0), slot.size(0))
+                assert title.size(0) == dur.size(0), \
+                    't %d, d %d' % (title.size(0), dur.size(0))
 
                 for i, (d, s) in enumerate(zip(dur, slot)):
+                    if d < 0:
+                        d = 0
                     new_slot.append(s)
                     new_title.append(title[i])
                     for k in range(d):
@@ -572,15 +569,11 @@ class NETS(nn.Module):
                 context_contents = \
                     torch.cat((new_title, user_src_embed, slot_embed), 1)
             else:
-                dur = dur / 30 - 1
-                new_slot = list()
-
-                assert dur.size(0) == slot.size(0), \
-                    'd %d, s %d' % (dur.size(0), slot.size(0))
-
                 for i, (d, s) in enumerate(zip(dur, slot)):
                     new_slot.append(s)
                     for k in range(d):
+                        if d < 0:
+                            d = 0
                         if s + k + 1 < total_slots:
                             new_slot.append(s + k + 1)
                 new_slot = np.array(new_slot)
@@ -640,8 +633,7 @@ class NETS(nn.Module):
         # (user_embed_dim + slot_embed_dim + st_rnn_hdim * num_directions,
         #  sm_day_num,
         #  sm_slot_num)
-        context_map = torch.transpose(
-            torch.transpose(context_map, 0, 2), 1, 2)
+        context_map = context_map.permute(2, 0, 1)
 
         # multiple filter conv
         conv_list = [self.sm_conv1, self.sm_conv2]
@@ -681,7 +673,7 @@ class NETS(nn.Module):
             concat = concat_seq[0]
 
         nonl = F.rrelu(self.mt_nonl(concat))
-        gate = F.sigmoid(self.mt_gate(concat))
+        gate = torch.sigmoid(self.mt_gate(concat))
         output = torch.mul(gate, nonl) + torch.mul(1 - gate, concat)
         output = F.dropout(output, p=self.config.output_dr,
                            training=self.training)
@@ -723,7 +715,8 @@ class NETS(nn.Module):
         intention_rep = None
         if not self.config.no_intention:
             dur_embed = self.dur_embed(dur.to(self.device))
-            # dur_embed = torch.zeros(dur_embed.size()).to(self.device)
+            # dur_embed = torch.zeros(dur.size(0), self.config.dur_embed_dim) \
+            #     .to(self.device)
 
             if self.config.dur_dr > 0:
                 dur_embed = F.dropout(dur_embed,
@@ -751,7 +744,7 @@ class NETS(nn.Module):
 
         assert output.size(1) == \
             self.config.sm_day_num * self.config.sm_slot_num
-        return output, (title_rep, intention_rep)
+        return output
 
     def get_regloss(self, weight_decay=None):
         if weight_decay is None:
@@ -770,98 +763,6 @@ class NETS(nn.Module):
             param_group['lr'] = self.config.lr
 
         print('\tlearning rate decay to %.3f' % self.config.lr)
-
-    @Profile(__name__)
-    def get_metrics(self, outputs, targets, ex_targets=None, topk=5):
-
-        def get_recalls():
-            def get_r1_r5(_o, _t):
-                out_topk = torch.topk(_o, topk)[1]
-                if _t == out_topk[0]:
-                    return 1., 1.
-                else:
-                    if _t in out_topk:
-                        return 0., 1.
-                return 0., 0.
-
-            ex1 = 0.
-            ex5 = 0.
-            if ex_targets is None:
-                for o, t in zip(outputs, targets):
-                    r1, r5 = get_r1_r5(o, t)
-                    ex1 += r1
-                    ex5 += r5
-            else:
-                for o, et, t in zip(outputs, ex_targets, targets):
-                    assert et[t] == 0
-                    output = o[:] - (et[:] * 1e16)
-                    r1, r5 = get_r1_r5(output, t)
-                    ex1 += r1
-                    ex5 += r5
-            return ex1, ex5
-
-        def ndcg_at_k(r, k):
-            def get_dcg(_r, _k):
-                _dcg = 0.
-                for rk_idx, rk in enumerate(_r):
-                    if rk_idx == _k:
-                        break
-                    _dcg += ((2 ** rk) - 1) / math.log2(2 + rk_idx)
-                return _dcg
-
-            return get_dcg(r, k) / get_dcg(sorted(r, reverse=True), k)
-
-        def inverse_euclidean_distance(target, pred):
-            euc = (((pred // self.n_day_slots) - (target // self.n_day_slots))
-                   ** 2
-                   + ((pred % self.n_day_slots) - (target % self.n_day_slots))
-                   ** 2) ** 0.5
-            return 1. / (euc + 1.)
-
-        def get_mrr_ndcg(calc_ndcg=False):
-            mrr_sum = 0.
-            ndcg_at_5_sum = 0.
-            outputs_topall_idxes = torch.topk(outputs, self.n_classes)[1]
-
-            # relevance vector for nDCG
-            relevance_vector = [0.] * self.n_classes if calc_ndcg else None
-
-            for target_slot_idx, ota in zip(targets, outputs_topall_idxes):
-                target_rank_idx = -1
-                for rank_idx, slot_idx in enumerate(ota):
-                    if target_slot_idx.item() == slot_idx.item():
-                        target_rank_idx = rank_idx
-                        if not calc_ndcg:
-                            break
-
-                    if calc_ndcg:
-                        # assign ieuc
-                        relevance_vector[rank_idx] = \
-                            inverse_euclidean_distance(target_slot_idx.item(),
-                                                       slot_idx.item())
-
-                assert target_rank_idx > -1
-
-                # MRR
-                mrr_sum += 1. / (target_rank_idx + 1)
-
-                if calc_ndcg:
-                    # nDCG@5
-                    ndcg_at_5_sum += ndcg_at_k(relevance_vector, 5)
-            return mrr_sum, ndcg_at_5_sum
-
-        def get_ieuc():
-            ieuc_sum = 0.
-            outputs_max_idxes = torch.max(outputs, 1)[1]
-            for t, m in zip(targets, outputs_max_idxes):
-                ieuc_sum += inverse_euclidean_distance(t.item(), m.item())
-            return ieuc_sum
-
-        recall1, recall5 = get_recalls()
-        mrr, ndcg_at_5 = get_mrr_ndcg()
-        ieuc = get_ieuc()
-
-        return recall1, recall5, mrr, ieuc, ndcg_at_5
 
     def save_checkpoint(self, state, filename=None):
         if filename is None:
@@ -888,7 +789,6 @@ class NETS(nn.Module):
                                 else 'cpu')
         self.load_state_dict(checkpoint['state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
-        # self.config = checkpoint['config']
 
     @Profile(__name__)
     def write_summary(self, mode, loss, metrics, offset, add_histogram=False):
@@ -902,8 +802,99 @@ class NETS(nn.Module):
             for name, param in self.named_parameters():
                 if not param.requires_grad:
                     continue
+                # add_histogram() takes lots of time
                 self.summary_writer.add_histogram(
                     name, param.clone().cpu().data.numpy(), offset)
 
     def close_summary_writer(self):
         self.summary_writer.close()
+
+
+@Profile(__name__)
+def get_metrics(outputs, targets, n_day_slots, n_classes, ex_targets=None,
+                topk=5):
+    if ex_targets is not None:
+        for output, target, et in zip(outputs, targets, ex_targets):
+            assert et[target] == 0
+            output -= et * 99999.
+
+    def get_recalls():
+        def get_r1_r5(_o, _t):
+            out_topk = torch.topk(_o, topk)[1]
+            if _t == out_topk[0]:
+                return 1., 1.
+            else:
+                if _t in out_topk:
+                    return 0., 1.
+            return 0., 0.
+
+        ex1 = 0.
+        ex5 = 0.
+        for o, t in zip(outputs, targets):
+            r1, r5 = get_r1_r5(o, t)
+            ex1 += r1
+            ex5 += r5
+        return ex1, ex5
+
+    def ndcg_at_k(r, k):
+        def get_dcg(_r, _k):
+            _dcg = 0.
+            for rk_idx, rk in enumerate(_r):
+                if rk_idx == _k:
+                    break
+                _dcg += ((2 ** rk) - 1) / math.log2(2 + rk_idx)
+            return _dcg
+
+        return get_dcg(r, k) / get_dcg(sorted(r, reverse=True), k)
+
+    def inverse_euclidean_distance(_target, pred):
+        euc = (((pred // n_day_slots) - (_target // n_day_slots))
+               ** 2
+               + ((pred % n_day_slots) - (_target % n_day_slots))
+               ** 2) ** 0.5
+        return 1. / (euc + 1.)
+
+    def get_mrr_ndcg(calc_ndcg=False):
+        mrr_sum = 0.
+        ndcg_at_5_sum = 0.
+        outputs_topall_idxes = torch.topk(outputs, n_classes)[1]
+
+        # relevance vector for nDCG
+        relevance_vector = [0.] * n_classes if calc_ndcg else None
+
+        for target_slot_idx, ota in zip(targets, outputs_topall_idxes):
+            target_rank_idx = -1
+            for rank_idx, slot_idx in enumerate(ota):
+                if target_slot_idx.item() == slot_idx.item():
+                    target_rank_idx = rank_idx
+                    if not calc_ndcg:
+                        break
+
+                if calc_ndcg:
+                    # assign ieuc
+                    relevance_vector[rank_idx] = \
+                        inverse_euclidean_distance(slot_idx.item(),
+                                                   target_slot_idx.item())
+
+            assert target_rank_idx > -1
+
+            # MRR
+            mrr_sum += 1. / (target_rank_idx + 1)
+
+            if calc_ndcg:
+                # nDCG@5
+                ndcg_at_5_sum += ndcg_at_k(relevance_vector, 5)
+        return mrr_sum, ndcg_at_5_sum
+
+    def get_ieuc():
+        ieuc_sum = 0.
+        outputs_max_idxes = torch.max(outputs, 1)[1]
+        for m, t in zip(outputs_max_idxes, targets):
+            ieuc_sum += inverse_euclidean_distance(t.item(), m.item())
+        return ieuc_sum
+
+    recall1, recall5 = get_recalls()
+    mrr, _ = get_mrr_ndcg(calc_ndcg=False)
+    ieuc = get_ieuc()
+
+    return recall1, recall5, mrr, ieuc

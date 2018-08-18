@@ -18,11 +18,50 @@ if not os.path.exists(os.path.join(os.path.expanduser('~'), 'nltk_data')):
 class NETSDataset(object):
     def __init__(self, _config, pretrained_dict):
         self.config = _config
-        self.initial_settings()
-        self.initialize_dictionary()
 
-        # only for stats
-        self.week_key_set = set()
+        # initial, predefined settings
+        self.UNK = 'UNK'
+        self.PAD = 'PAD'
+        self.BOW = 'BOW'
+        self.EOW = 'EOW'
+        self.DURATION_UNK = 0
+        self.feature_len = 12
+        self.duration_unit = 30  # min
+        self.max_rs_dist = 2  # reg-st week distance
+        self.class_div = 2  # 168 output
+        self.slot_size = 336
+        self.max_context = float("inf")  # 35
+        self.min_word_cnt = 0
+        self.max_title_len = 50
+        self.max_word_len = 50
+        self.max_event_cnt = 5000
+
+        # initialize_dictionary
+        # dictionary specific settings
+        self.char2idx = {}
+        self.idx2char = {}
+        self.word2idx = {}
+        self.idx2word = {}
+        self.widx2vec = []  # pretrained
+        self.user2idx = {}
+        self.idx2user = {}
+        self.dur2idx = {}
+        self.idx2dur = {}
+        self.char2idx[self.PAD] = self.word2idx[self.PAD] = 0
+        self.char2idx[self.UNK] = self.word2idx[self.UNK] = 1
+        self.char2idx[self.BOW] = 2
+        self.char2idx[self.EOW] = 3
+        self.idx2char[0] = self.idx2word[0] = self.PAD
+        self.idx2char[1] = self.idx2word[1] = self.UNK
+        self.idx2char[2] = self.BOW
+        self.idx2char[3] = self.EOW
+        self.user2idx[self.UNK] = 0
+        self.idx2user[0] = self.UNK
+        self.dur2idx[self.DURATION_UNK] = 0
+        self.idx2dur[0] = self.DURATION_UNK
+        self.initial_word_dict = {}
+        self.invalid_weeks = set()
+        self.user_event_cnt = {}
 
         assert pretrained_dict is not None
 
@@ -54,6 +93,9 @@ class NETSDataset(object):
         self.config.slot_size = self.slot_size
         self.config.class_div = self.class_div
 
+        # only for stats
+        self.week_key_set = set()
+
         self.train_data = None
         self.valid_data = None
         self.test_data = self.process_data(
@@ -62,44 +104,6 @@ class NETSDataset(object):
         self.train_ptr = 0
         self.valid_ptr = 0
         self.test_ptr = 0
-    
-    def initial_settings(self):
-        # predefined settings
-        self.UNK = 'UNK'
-        self.PAD = 'PAD'
-        self.feature_len = 12
-        self.duration_unit = 30  # min
-        self.max_rs_dist = 2  # reg-st week distance
-        self.class_div = 2  # 168 output
-        self.slot_size = 336
-        self.max_context = float("inf")  # 35
-        self.min_word_cnt = 0
-        self.max_title_len = 50
-        self.max_word_len = 50
-        self.max_event_cnt = 5000
-
-    def initialize_dictionary(self):
-        # dictionary specific settings
-        self.char2idx = {}
-        self.idx2char = {}
-        self.word2idx = {}
-        self.idx2word = {}
-        self.widx2vec = []  # pretrained
-        self.user2idx = {}
-        self.idx2user = {}
-        self.dur2idx = {}
-        self.idx2dur = {}
-        self.char2idx[self.PAD] = self.word2idx[self.PAD] = 0
-        self.char2idx[self.UNK] = self.word2idx[self.UNK] = 1
-        self.idx2char[0] = self.idx2word[0] = self.PAD
-        self.idx2char[1] = self.idx2word[1] = self.UNK
-        self.user2idx[self.UNK] = 0
-        self.idx2user[0] = self.UNK
-        self.dur2idx[self.UNK] = 0
-        self.idx2dur[0] = self.UNK
-        self.initial_word_dict = {}
-        self.invalid_weeks = []
-        self.user_event_cnt = {}
 
     def update_dictionary(self, key, mode=None):
         # update dictionary given a key
@@ -124,7 +128,7 @@ class NETSDataset(object):
         # mapping list of keys into dictionary 
         #   reverse=False : word2idx, char2idx
         #   reverse=True : idx2word, idx2char
-        output = []
+        output = list()
         for key in key_list:
             if key in dictionary:
                 # skip PAD for reverse
@@ -141,9 +145,28 @@ class NETSDataset(object):
     
     def build_word_dict(self, path, update=True):
         print('### build word dict %s' % path)
+
+        def check_printable(text, w_key):
+            for char in text:
+                if char not in string.printable:
+                    self.invalid_weeks.add(w_key)
+                    return False
+            return True
+
+        def check_maxlen(text, w_key):
+            _what_split = nltk.word_tokenize(text)
+            if len(_what_split) > self.max_title_len:
+                self.invalid_weeks.add(w_key)
+                return False
+            for _word in _what_split:
+                if len(_word) > self.max_word_len:
+                    self.invalid_weeks.add(w_key)
+                    return False
+            return True
+
         with open(path, 'r', newline='', encoding='utf-8') as f:
             calendar_data = csv.reader(f, quotechar='"')
-            prev_what_list = []
+            prev_what_list = list()
             prev_week_key = ''
             for k, features in enumerate(calendar_data):
                 assert len(features) == self.feature_len 
@@ -154,34 +177,13 @@ class NETSDataset(object):
                 reg_seq = int(features[7])
                 week_key = '_'.join([user_id, st_year, st_week])
 
-                def check_printable(text, w_key):
-                    for char in text:
-                        if char not in string.printable:
-                            if w_key not in self.invalid_weeks:
-                                self.invalid_weeks.append(w_key)
-                            return False
-                    return True
-                
-                def check_maxlen(text, w_key):
-                    _what_split = nltk.word_tokenize(text)
-                    if len(_what_split) > self.max_title_len:
-                        if w_key not in self.invalid_weeks:
-                            self.invalid_weeks.append(w_key)
-                            return False
-                    for _word in _what_split:
-                        if len(_word) > self.max_word_len:
-                            if w_key not in self.invalid_weeks:
-                                self.invalid_weeks.append(w_key)
-                                return False
-                    return True
-
                 if reg_seq == 0:
                     assert prev_week_key != week_key
                     # process previous week's what list
                     if prev_week_key not in self.invalid_weeks and update:
                         for single_what in prev_what_list:
                             what_split = nltk.word_tokenize(single_what)
-                            if self.config.word2vec_type == 6:
+                            if self.config.glove_type == 6:
                                 what_split = [word.lower() for word
                                               in what_split]
                             for word in what_split:
@@ -198,7 +200,7 @@ class NETSDataset(object):
                             and check_maxlen(what, week_key):
                         prev_what_list = [what]
                     else:
-                        prev_what_list = []
+                        prev_what_list = list()
                     prev_week_key = week_key
                 else:
                     assert prev_week_key == week_key
@@ -220,30 +222,28 @@ class NETSDataset(object):
                 cols = line.split(' ')
                 if cols[0] in self.initial_word_dict:
                     word2vec[cols[0]] = [float(l) for l in cols[1:]]
-        
-        widx2vec = []
+
         unk_cnt = 0
-        widx2vec.append([0.] * self.config.word_embed_dim)  # PAD
-        widx2vec.append([1.] * self.config.word_embed_dim)  # UNK
+        self.widx2vec.append([0.] * self.config.word_embed_dim)  # PAD
+        self.widx2vec.append([1.] * self.config.word_embed_dim)  # UNK
 
         for word, (word_idx, word_cnt) in self.initial_word_dict.items():
-            if word != 'UNK' and word != 'PAD':
+            if word != self.UNK and word != self.PAD:
                 assert word_cnt > 0
                 if word in word2vec and word_cnt > self.min_word_cnt:
                     self.update_dictionary(word, 'w')
-                    widx2vec.append(word2vec[word])
+                    self.widx2vec.append(word2vec[word])
                 else:
                     unk_cnt += 1
 
-        self.widx2vec = widx2vec
-
-        print('pretrained vectors', np.asarray(widx2vec).shape, '#unk', unk_cnt)
+        print('pretrained vectors', np.asarray(self.widx2vec).shape,
+              '#unk', unk_cnt)
         print('dictionary change', len(self.initial_word_dict),
               'to', len(self.word2idx), len(self.idx2word), end='\n\n')
 
     def process_data(self, path, update_dict=False):
         print('### processing %s' % path)
-        total_data = []
+        total_data = list()
         max_wordlen = max_sentlen = max_dur = max_context = 0
         min_dur = float("inf")
         max_slot_idx = (self.slot_size // self.class_div) - 1
@@ -266,7 +266,7 @@ class NETSDataset(object):
             """
             prev_user = ''
             prev_st_yw = ('', '')
-            saved_context = []
+            saved_context = list()
             calendar_data = csv.reader(f, quotechar='"')
 
             for k, features in enumerate(calendar_data):
@@ -310,7 +310,7 @@ class NETSDataset(object):
 
                 # process title feature
                 what_split = nltk.word_tokenize(what)
-                if self.config.word2vec_type == 6:
+                if self.config.glove_type == 6:
                     what_split = [word.lower() for word in what_split]
                 for word in what_split:
                     max_wordlen = \
@@ -327,9 +327,11 @@ class NETSDataset(object):
                 if max_sentlen > self.config.max_sentlen:
                     self.config.max_sentlen = max_sentlen
                 
-                sentchar = []
+                sentchar = list()
                 for word in what_split:
-                    sentchar.append(self.map_dictionary(word, self.char2idx))
+                    sentchar.append([self.char2idx[self.BOW]] +
+                                    self.map_dictionary(word, self.char2idx) +
+                                    [self.char2idx[self.EOW]])
                 sentword = self.map_dictionary(what_split, self.word2idx)
                 length = len(sentword)
                 assert len(sentword) == len(sentchar)
@@ -363,8 +365,7 @@ class NETSDataset(object):
                     assert curr_user != prev_user or curr_st_yw != prev_st_yw
                     prev_user = curr_user
                     prev_st_yw = curr_st_yw
-                    # prev_grid = []
-                    input_context = []
+                    input_context = list()
                     saved_context = [[input_title, fine_duration, input_slot]]
                 else:  # same as the prev week
                     assert curr_user == prev_user and curr_st_yw == prev_st_yw
@@ -379,29 +380,14 @@ class NETSDataset(object):
                 # transform context features into slot grid
                 # context slots w/ durations
 
-                target_n_slot = \
-                    int(math.ceil(input_duration / (30 * self.class_div)))
-                targets_w_duration = list()
-                for shift in range(target_n_slot):
-                    if target_slot + shift >= max_slot_idx:
-                        break
-                    targets_w_duration.append(target_slot + shift)
-
-                input_grid = list()
+                input_grid = set()
                 for ips in input_context:
                     n_slots = int(math.ceil(ips[1] / (30 * self.class_div)))
                     for slot_idx in range(n_slots):
                         slot = ips[2] + slot_idx
                         if slot >= max_slot_idx:
                             break
-
-                        if slot in targets_w_duration \
-                                or slot in input_grid:
-                            continue
-
-                        input_grid.append(slot)
-
-                assert target_slot not in input_grid
+                        input_grid.add(slot)
 
                 # filter by register distance & max_context & recurrent
                 if (reg_st_week_dist <= self.max_rs_dist
@@ -412,7 +398,7 @@ class NETSDataset(object):
                         else len(input_context)
                     total_data.append(
                         [input_user, input_title, input_duration,
-                         input_context, input_grid, target_slot])
+                         input_context, list(input_grid), target_slot])
 
                     if user_id not in self.user_event_cnt:
                         self.user_event_cnt[user_id] = 1
@@ -489,7 +475,8 @@ class NETSDataset(object):
 
         return train_loader, valid_loader, test_loader
 
-    def batchify(self, batch):
+    @staticmethod
+    def batchify(batch):
         users = torch.cat([example[0] for example in batch])
         durs = torch.cat([example[1] for example in batch])
         tcs = [example[2] for example in batch]
@@ -526,6 +513,46 @@ class NETSDataset(object):
 
         return [n_samples / (n_classes * cnt) for cnt in cnt_list]
 
+    def get_train_user_class_dist(self):
+        user_prob_dist_dict = dict()
+
+        # unknown/global
+        unknown_user_idx = self.user2idx[self.UNK]
+        user_prob_dist_dict[unknown_user_idx] = \
+            [0.] * (self.slot_size // self.class_div)
+
+        for td in self.train_data:
+            user_idx = td[0]
+            assert user_idx != unknown_user_idx
+
+            target = td[5]
+            u_prob_dist = user_prob_dist_dict.get(user_idx)
+            if u_prob_dist is None:
+                u_prob_dist = [0.] * (self.slot_size // self.class_div)
+                u_prob_dist[target] += 1.
+                user_prob_dist_dict[user_idx] = u_prob_dist
+            else:
+                u_prob_dist[target] += 1.
+
+            # unknown/global
+            user_prob_dist_dict[unknown_user_idx][target] += 1.
+
+        # normalize
+        for uidx in user_prob_dist_dict:
+            user_prob_dist = user_prob_dist_dict[uidx]
+            num_u_events = sum(user_prob_dist)
+            user_prob_dist_dict[uidx] = \
+                [cnt/num_u_events for cnt in user_prob_dist]
+            # print(uidx, user_prob_dist_dict[uidx][:24])
+
+        # handle unseen users
+        for uidx in self.idx2user:
+            if uidx not in user_prob_dist_dict:
+                user_prob_dist_dict[uidx] = \
+                    user_prob_dist_dict[unknown_user_idx]
+
+        return user_prob_dist_dict
+
 
 class Vectorize(Dataset):
 
@@ -552,11 +579,11 @@ class Vectorize(Dataset):
 
         # context (title, duration, slot)
         context = example[3]
-        stc = []
-        stw = []
-        stl = []
-        sdur = []
-        sslot = []
+        stc = list()
+        stw = list()
+        stl = list()
+        sdur = list()
+        sslot = list()
         for _, event in enumerate(context):
             stc.append(event[0][0])
             stw.append(event[0][1])
@@ -571,7 +598,6 @@ class Vectorize(Dataset):
 
         # Target
         target = torch.LongTensor([example[5]])
-        assert example[5] not in example[4], (example[4], example[5])
 
         return user, dur, tc, tw, tl, stc, stw, stl, sdur, sslot, grid, target
 
@@ -617,9 +643,11 @@ class Config(object):
         self.valid_path = os.path.join(path_base, 'valid.csv')
         self.test_path = os.path.join(path_base, 'test.csv')
         # http://nlp.stanford.edu/data/glove.840B.300d.zip
-        self.word2vec_path = \
-            os.path.expanduser('~') + '/common/glove/glove.840B.300d.txt'
-        self.word2vec_type = 840  # 6 or 840 (B)
+        self.glove_path = \
+            os.path.join(os.path.expanduser('~'), 'common',
+                         'glove.840B.300d.txt')
+        self.glove_type = 840  # 6 or 840 (B)
+        assert os.path.exists(self.glove_path)
         self.word_embed_dim = 300
         self.batch_size = 16
         self.max_wordlen = 0
@@ -630,17 +658,17 @@ class Config(object):
         self.dur_size = 0
         self.class_div = 0
         self.slot_size = 0
-        self.data_workers = 5
-        self.save_preprocess = False
+        self.data_workers = 4
+        self.save_dataset = False
         self.sm_day_num = 7
         self.sm_slot_num = 24
-        self.preprocess_save_path = './data/preprocess_tmp.pkl'
-        self.preprocess_load_path = './data/preprocess_.pkl'
+        self.preprocess_save_path = './data/dataset_tmp.pkl'
+        self.preprocess_load_path = './data/dataset_.pkl'
 
 
 if __name__ == '__main__':
     config = Config()
-    if config.save_preprocess:
+    if config.save_dataset:
         dataset = NETSDataset(config)
         pickle.dump(dataset, open(config.preprocess_save_path, 'wb'))
     else:
@@ -652,12 +680,23 @@ if __name__ == '__main__':
         ([(k, v) for k, v in vars(dataset.config).items() if '__' not in k]))
     print()
 
+    num_all_data = \
+        len(dataset.train_data) + len(dataset.valid_data) + \
+        len(dataset.test_data)
+    print('#all_data', num_all_data)
+    print('#train_data {} ({:.1f}%)'.format(
+        len(dataset.train_data), 100 * len(dataset.train_data) / num_all_data))
+    print('#valid_data {} ({:.1f}%)'.format(
+        len(dataset.valid_data), 100 * len(dataset.valid_data) / num_all_data))
+    print('#test_data {} ({:.1f}%)'.format(
+        len(dataset.test_data), 100 * len(dataset.test_data) / num_all_data))
+
     class_counts = dataset.get_train_class_counts()
     print('class_counts', 'min', min(class_counts), 'max', max(class_counts))
     w = dataset.get_class_weights()
     print('class_weights', 'min', min(w), 'max', max(w))
 
-    for d_idx, ex in enumerate(dataset.get_dataloader(batch_size=16)[0]):
-        if d_idx % 100 == 0:
+    for d_idx, ex in enumerate(dataset.get_dataloader(batch_size=32)[0]):
+        if d_idx % 1000 == 0:
             print(d_idx)
     print('\niteration test pass!')

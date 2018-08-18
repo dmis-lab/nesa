@@ -1,9 +1,8 @@
-google-api-python-client==1.6.7
+google-api-python-client==1.7.4
 httplib2==0.11.3
-nltk==3.2.5
-numpy==1.14.3
+nltk==3.3
+numpy==1.15.0
 oauth2client==4.1.2
-python-dateutil==2.7.2
-tensorboardX==1.2
-torch==0.4.0
-torchvision==0.2.1
+python-dateutil==2.7.3
+tensorboardX==1.4
+torch==0.4.1

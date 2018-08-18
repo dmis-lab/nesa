@@ -1,29 +1,33 @@
-# NETS: Neural Event Time Scheduler Utilizing User Intention and Calendar Context
-Donghyeon Kim and Jinhyuk Lee et al.
+# NESA
+Implementation of "Learning User Preferences and Understanding Calendar Contexts for Event Scheduling"
+
+Donghyeon Kim and Jinhyuk Lee _et al_.
 
 # Prerequisites
-* [PyTorch](http://pytorch.org/) 0.4.0
+* Python 3
+* [PyTorch](http://pytorch.org/) 0.4.1
 * (Optional) NVIDIA GPU (memory size: 8GB or greater)
-    * [CUDA](https://developer.nvidia.com/cuda-downloads) 9.1
-    * [cuDNN](https://developer.nvidia.com/cudnn) 7
+    * [CUDA](https://developer.nvidia.com/cuda-downloads)
+    * [cuDNN](https://developer.nvidia.com/cudnn)
 * A [Google](https://www.google.com) account
 
-# Download sample data (Check if working directory is "nets")
+# Download sample data
+* Check if working directory is "nesa"
 ```
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/sample_data.csv
+$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nesa/sample_data.csv
 ```
 
 # Download word, character dictionaries
 ```
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/preprocess_180504_dict.pkl
+$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nesa/dataset_180522_dict.pkl
 ```
 
-# Download pretrained NETS model
+# Download pretrained NESA model
 ```
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nets/nets_180512_0.pth
+$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nesa/nesa_180522_0.pth
 ```
 
-# Run NETS w/ sample data
+# Run NESA w/ sample data
 ```
 # Set PYTHONPATH environment variable
 $ export PYTHONPATH=$PYTHONPATH:$(pwd)
@@ -32,7 +36,7 @@ $ export PYTHONPATH=$PYTHONPATH:$(pwd)
 $ python3 test.py
 ```
 
-# Run NETS w/ your calendar data
+# Bonus: Run NESA w/ your calendar data
 * Important: Download client_secret.json to the project folder before running get_google_calendar_events.py
 (See https://developers.google.com/google-apps/calendar/quickstart/python)
 ```

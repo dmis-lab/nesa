@@ -1,6 +1,6 @@
 import argparse
 import dataset
-from model import NETS
+from model import NESA, get_metrics
 import numpy as np
 import os
 import pickle
@@ -19,7 +19,7 @@ def get_dataset(cfg, trained_dict_path):
     return test_set
 
 
-def get_model(widx2vec, model_path, dvc, arg):
+def get_model(widx2vec, model_path, dvc, idx2dur, arg):
     model_dir, model_filename = os.path.split(model_path)
     checkpoint = torch.load(model_path,
                             map_location=None if 'cuda' == dvc.type else 'cpu')
@@ -27,15 +27,18 @@ def get_model(widx2vec, model_path, dvc, arg):
     ckpt_dict = vars(ckpt_config)
     ckpt_dict['yes_cuda'] = arg.yes_cuda  # overriding
 
-    model = NETS(ckpt_config, widx2vec).to(dvc)
+    model = \
+        NESA(ckpt_config, widx2vec,
+             idx2dur=idx2dur if ckpt_config.use_duration_scala > 0
+             else None).to(dvc)
     model.config.checkpoint_dir = model_dir + '/'
     model.load_checkpoint(filename=model_filename[:-4])  # .pth
     # import pprint
     # pprint.PrettyPrinter().pprint(_model.config.__dict__)
-    return model
+    return model, ckpt_config
 
 
-def measure_performance(test_set, model, dvc, batch_size=1):
+def measure_performance(test_set, model, conf, dvc, batch_size=1):
     performance_dict = dict()
     performance_dict['recall1'] = 0.
     performance_dict['recall5'] = 0.
@@ -45,23 +48,26 @@ def measure_performance(test_set, model, dvc, batch_size=1):
     performance_dict['steps'] = 0.
 
     model = model.eval()
-    torch.set_grad_enabled(False)
 
     _, _, test_loader = test_set.get_dataloader(batch_size=batch_size)
-    for d_idx, ex in enumerate(test_loader):
-        labels = ex[-1].to(dvc)
-        outputs, reps = model(*ex[:-1])
-        metrics = model.get_metrics(outputs, labels, ex[-2].to(dvc))
+    with torch.no_grad():
+        for d_idx, ex in enumerate(test_loader):
+            labels = ex[-1].to(dvc)
+            outputs = model(*ex[:-1])
+            metrics = get_metrics(outputs, labels, model.n_day_slots,
+                                  model.n_classes,
+                                  ex_targets=ex[-2].to(device)
+                                  if conf.ex_pre_events > 0 else None)
 
-        performance_dict['recall1'] += metrics[0]
-        performance_dict['recall5'] += metrics[1]
-        performance_dict['mrr'] += metrics[2]
-        performance_dict['ieuc'] += metrics[3]
-        performance_dict['count'] += outputs.data.size()[0]
-        performance_dict['steps'] += 1.
+            performance_dict['recall1'] += metrics[0]
+            performance_dict['recall5'] += metrics[1]
+            performance_dict['mrr'] += metrics[2]
+            performance_dict['ieuc'] += metrics[3]
+            performance_dict['count'] += outputs.data.size()[0]
+            performance_dict['steps'] += 1.
 
-        if d_idx % 1000 == 0 and d_idx > 0:
-            print(d_idx)
+            if d_idx % 1000 == 0 and d_idx > 0:
+                print(d_idx)
 
     steps = performance_dict['steps']
     recall1 = performance_dict['recall1'] / steps
@@ -92,9 +98,9 @@ if __name__ == '__main__':
     arg_parser.add_argument("--serialized_data_path", type=str,
                             default='./data/preprocess_test.pkl')
     arg_parser.add_argument("--model_path", type=str,
-                            default='./data/nets_180512_0.pth')
+                            default='./data/nesa_180522_0.pth')
     arg_parser.add_argument("--trained_dict_path", type=str,
-                            default='./data/preprocess_180504_dict.pkl')
+                            default='./data/dataset_180522_dict.pkl')
     arg_parser.add_argument("--seed", type=int, default=3)
     arg_parser.add_argument('--yes_cuda', type=int, default=1)
     args = arg_parser.parse_args()
@@ -115,8 +121,9 @@ if __name__ == '__main__':
     test_dataset = get_dataset(config, args.trained_dict_path)
     assert test_dataset is not None
 
-    print('Loading NETS model..')
-    nets_model = get_model(test_dataset.widx2vec, args.model_path, device, args)
+    print('Loading NESA model..')
+    nesa_model, nesa_conf = get_model(test_dataset.widx2vec, args.model_path,
+                                      device, test_dataset.idx2dur, args)
 
-    print('\nMeasuring NETS performance on test data..')
-    measure_performance(test_dataset, nets_model, device)
+    print('\nMeasuring NESA performance on test data..')
+    measure_performance(test_dataset, nesa_model, nesa_conf, device)
