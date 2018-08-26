@@ -1,14 +1,13 @@
-# NESA
+# NESA: Neural Event Scheduling Assistant
 Implementation of "Learning User Preferences and Understanding Calendar Contexts for Event Scheduling"
 
 Donghyeon Kim and Jinhyuk Lee _et al_.
 
 # Prerequisites
-* Python 3
+* [Python 3](https://www.python.org/downloads/)
 * [PyTorch](http://pytorch.org/) 0.4.1
 * (Optional) NVIDIA GPU (memory size: 8GB or greater)
-    * [CUDA](https://developer.nvidia.com/cuda-downloads)
-    * [cuDNN](https://developer.nvidia.com/cudnn)
+    * [CUDA](https://developer.nvidia.com/cuda-downloads), [cuDNN](https://developer.nvidia.com/cudnn)
 * A [Google](https://www.google.com) account
 
 # Download sample data
@@ -36,7 +35,7 @@ $ export PYTHONPATH=$PYTHONPATH:$(pwd)
 $ python3 test.py
 ```
 
-# Bonus: Run NESA w/ your calendar data
+# (Optional) Run NESA w/ your calendar data
 * Important: Download client_secret.json to the project folder before running get_google_calendar_events.py
 (See https://developers.google.com/google-apps/calendar/quickstart/python)
 ```
