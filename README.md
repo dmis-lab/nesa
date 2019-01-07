@@ -3,6 +3,18 @@ Implementation of ["Learning User Preferences and Understanding Calendar Context
 
 Donghyeon Kim and Jinhyuk Lee _et al_.
 
+# Citation
+```
+@inproceedings{kim2018learning,
+  title={Learning User Preferences and Understanding Calendar Contexts for Event Scheduling},
+  author={Kim, Donghyeon and Lee, Jinhyuk and Choi, Donghee and Choi, Jaehoon and Kang, Jaewoo},
+  booktitle={Proceedings of the 27th ACM International Conference on Information and Knowledge Management},
+  pages={337--346},
+  year={2018},
+  organization={ACM}
+}
+```
+
 # Prerequisites
 * [Python 3](https://www.python.org/downloads/)
 * [PyTorch](http://pytorch.org/) 0.4.1
