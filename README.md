@@ -3,7 +3,7 @@ Implementation of ["Learning User Preferences and Understanding Calendar Context
 
 Donghyeon Kim and Jinhyuk Lee _et al_.
 
-# Citation
+## Citation
 ```
 @inproceedings{kim2018learning,
   title={Learning User Preferences and Understanding Calendar Contexts for Event Scheduling},
@@ -15,30 +15,27 @@ Donghyeon Kim and Jinhyuk Lee _et al_.
 }
 ```
 
-# Prerequisites
+## Prerequisites
 * [Python 3](https://www.python.org/downloads/)
 * [PyTorch](http://pytorch.org/) 0.4.1
 * (Optional) NVIDIA GPU (memory size: 8GB or greater)
     * [CUDA](https://developer.nvidia.com/cuda-downloads), [cuDNN](https://developer.nvidia.com/cudnn)
 * A [Google](https://www.google.com) account
 
+## Installation
+Check if working directory is "nesa".
+```
 # Download sample data
-* Check if working directory is "nesa"
-```
 $ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nesa/sample_data.csv
-```
 
 # Download word, character dictionaries
-```
 $ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nesa/dataset_180522_dict.pkl
-```
 
 # Download pretrained NESA model
-```
 $ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nesa/nesa_180522_0.pth
 ```
 
-# Run NESA w/ sample data
+## Run NESA with sample data
 ```
 # Set PYTHONPATH environment variable
 $ export PYTHONPATH=$PYTHONPATH:$(pwd)
@@ -47,7 +44,7 @@ $ export PYTHONPATH=$PYTHONPATH:$(pwd)
 $ python3 test.py
 ```
 
-# (Optional) Run NESA w/ your calendar data
+## (Optional) Run NESA w/ your calendar data
 * Important: Download client_secret.json to the project folder before running get_google_calendar_events.py
 (See https://developers.google.com/google-apps/calendar/quickstart/python)
 ```
@@ -65,5 +62,5 @@ $ python3 get_google_calendar_events.py
 $ python3 test.py --input_path ./data/<primary_calendar_id>_events.csv
 ```
 
-# License
+## License
 Apache License 2.0
