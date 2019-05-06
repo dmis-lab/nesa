@@ -24,13 +24,13 @@ Implementation of ["Learning User Preferences and Understanding Calendar Context
 Check if working directory is "nesa".
 ```
 # Download sample data
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nesa/sample_data.csv
+wget --no-check-certificate -r 'https://docs.google.com/uc?export=download&id=101HhzB3Z7mi1tTlKCmaKflxGPqPZP0We' -O sample_data.csv
 
 # Download word, character dictionaries
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nesa/dataset_180522_dict.pkl
+wget --no-check-certificate -r 'https://docs.google.com/uc?export=download&id=1lbmwZYvaGC-FE13HDuR4jDNg6gssnSKz' -O dataset_180522_dict.pkl
 
 # Download pretrained NESA model
-$ wget -P data https://s3-us-west-1.amazonaws.com/ml-study0/nesa/nesa_180522_0.pth
+wget --no-check-certificate -r 'https://docs.google.com/uc?export=download&id=1VEYkboNUZdppvpxIU6j-lrT2LSFjs1QK' -O nesa_180522_0.pth
 ```
 
 ## Run NESA with sample data
