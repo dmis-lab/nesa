@@ -1,5 +1,8 @@
 # NESA: Neural Event Scheduling Assistant
-Implementation of ["Learning User Preferences and Understanding Calendar Contexts for Event Scheduling", CIKM'18](https://arxiv.org/abs/1809.01316) (D. Kim _et al_.)
+Implementation of ["Learning User Preferences and Understanding Calendar Contexts for Event Scheduling"](https://arxiv.org/abs/1809.01316)  
+Donghyeon Kim<sup>†</sup>, Jinhyuk Lee<sup>†</sup>, Donghee Choi, Jaehoon Choi, Jaewoo Kang  
+CIKM'18  
+<sup>†</sup> Both authors contributed equally to this work.
 
 ## Citation
 ```
