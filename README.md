@@ -1,8 +1,5 @@
 # NESA: Neural Event Scheduling Assistant
-Implementation of ["Learning User Preferences and Understanding Calendar Contexts for Event Scheduling"](https://arxiv.org/abs/1809.01316)  
-Donghyeon Kim<sup>†</sup>, Jinhyuk Lee<sup>†</sup>, Donghee Choi, Jaehoon Choi, Jaewoo Kang  
-CIKM'18  
-<sup>†</sup> Both authors contributed equally to this work.
+NESA is a deep learning-based event scheduling assistant which can recommend most suitable times for new calendar events of each user. This repository provides the official implementation of NESA. Due to the dataset privacy issue, we instead provide the pre-processing code for your own google calendar data. Please refer to our paper, [Learning User Preferences and Understanding Calendar Contexts for Event Scheduling (Kim et al., CIKM 2018)](https://arxiv.org/abs/1809.01316), for more details of our model.
 
 ## Citation
 ```
