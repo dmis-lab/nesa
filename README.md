@@ -22,16 +22,15 @@ NESA is a deep learning-based event scheduling assistant which can recommend mos
 
 ## Installation
 Check if working directory is "nesa".
-```
-# Download sample data
-wget --no-check-certificate -r 'https://docs.google.com/uc?export=download&id=101HhzB3Z7mi1tTlKCmaKflxGPqPZP0We' -O sample_data.csv
 
-# Download word, character dictionaries
-wget --no-check-certificate -r 'https://docs.google.com/uc?export=download&id=1lbmwZYvaGC-FE13HDuR4jDNg6gssnSKz' -O dataset_180522_dict.pkl
+### Download sample data
+- [sample_data.csv](http://gofile.me/6pN25/RzLIg9T9E)
 
-# Download pretrained NESA model
-wget --no-check-certificate -r 'https://docs.google.com/uc?export=download&id=1VEYkboNUZdppvpxIU6j-lrT2LSFjs1QK' -O nesa_180522_0.pth
-```
+### Download word, character dictionaries
+- [dataset_180522_dict.pkl](http://gofile.me/6pN25/xCHU9Cmt3)
+
+### Download pretrained NESA model
+- [nesa_180522_0.pth](http://gofile.me/6pN25/nAZbCQ5cx)
 
 ## Run NESA with sample data
 ```
