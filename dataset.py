@@ -7,11 +7,18 @@ import pprint
 import pickle
 import string
 import torch
-
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
 
 if not os.path.exists(os.path.join(os.path.expanduser('~'), 'nltk_data')):
+    # https://stackoverflow.com/a/50406704
+    import ssl
+    try:
+        _create_unverified_https_context = ssl._create_unverified_context
+    except AttributeError:
+        pass
+    else:
+        ssl._create_default_https_context = _create_unverified_https_context
     nltk.download('punkt')
 
 
@@ -644,7 +651,7 @@ class Config(object):
         self.test_path = os.path.join(path_base, 'test.csv')
         # http://nlp.stanford.edu/data/glove.840B.300d.zip
         self.glove_path = \
-            os.path.join(os.path.expanduser('~'), 'common',
+            os.path.join(os.path.expanduser('~'), 'nlp',
                          'glove.840B.300d.txt')
         self.glove_type = 840  # 6 or 840 (B)
         assert os.path.exists(self.glove_path)

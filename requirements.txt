@@ -1,8 +1,8 @@
-google-api-python-client>=1.7.4
+google-api-python-client
 httplib2
 nltk
 numpy
 oauth2client
 python-dateutil
-tensorboardX
-torch==0.4.1
+tensorboard
+torch==1.13.0

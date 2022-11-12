@@ -39,18 +39,16 @@ def get_model(widx2vec, model_path, dvc, idx2dur, arg):
 
 
 def measure_performance(test_set, model, conf, dvc, batch_size=1):
+    model = model.eval()
+
     performance_dict = dict()
     performance_dict['recall1'] = 0.
     performance_dict['recall5'] = 0.
     performance_dict['mrr'] = 0.
     performance_dict['ieuc'] = 0.
-    performance_dict['count'] = 0
-    performance_dict['steps'] = 0.
-
-    model = model.eval()
 
     _, _, test_loader = test_set.get_dataloader(batch_size=batch_size)
-    with torch.no_grad():
+    with torch.inference_mode():
         for d_idx, ex in enumerate(test_loader):
             labels = ex[-1].to(dvc)
             outputs = model(*ex[:-1])
@@ -63,30 +61,25 @@ def measure_performance(test_set, model, conf, dvc, batch_size=1):
             performance_dict['recall5'] += metrics[1]
             performance_dict['mrr'] += metrics[2]
             performance_dict['ieuc'] += metrics[3]
-            performance_dict['count'] += outputs.data.size()[0]
-            performance_dict['steps'] += 1.
 
             if d_idx % 1000 == 0 and d_idx > 0:
                 print(d_idx)
 
-    steps = performance_dict['steps']
-    recall1 = performance_dict['recall1'] / steps
-    recall5 = performance_dict['recall5'] / steps
-    mrr = performance_dict['mrr'] / steps
-    ieuc = performance_dict['ieuc'] / steps
+    n_samples = len(test_loader.dataset)
+    recall1 = performance_dict['recall1'] / n_samples
+    recall5 = performance_dict['recall5'] / n_samples
+    mrr = performance_dict['mrr'] / n_samples
+    ieuc = performance_dict['ieuc'] / n_samples
 
     print('recall@1 %.4f' % recall1)
     print('recall@5 %.4f' % recall5)
     print('mrr      %.4f' % mrr)
     print('ieuc     %.4f' % ieuc)
-    print('#events', performance_dict['count'])
+    print('#events', n_samples)
 
 
 def set_seed_all(seed):
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
 
@@ -109,8 +102,10 @@ if __name__ == '__main__':
     device = torch.device("cuda" if use_cuda else "cpu")
     print('CUDA device_count {0}'.format(torch.cuda.device_count())
           if use_cuda else 'CPU')
+    print(torch.__version__)
 
     set_seed_all(args.seed)
+    torch.use_deterministic_algorithms(True)
 
     config = dataset.Config()
     config.test_path = args.input_path

@@ -15,13 +15,16 @@ NESA is a deep learning-based event scheduling assistant which can recommend mos
 
 ## Prerequisites
 * [Python 3](https://www.python.org/downloads/)
-* [PyTorch](http://pytorch.org/) 0.4.1
+* [PyTorch](http://pytorch.org/) 1.13.0+
 * (Optional) NVIDIA GPU (memory size: 8GB or greater)
     * [CUDA](https://developer.nvidia.com/cuda-downloads), [cuDNN](https://developer.nvidia.com/cudnn)
 * A [Google](https://www.google.com) account
 
 ## Installation
 Check if working directory is "nesa".
+
+### Download word vector file and decompress it to your __home_dir/nlp__
+- [glove.840B.300d.zip](http://nlp.stanford.edu/data/glove.840B.300d.zip)
 
 ### Download sample data
 - [sample_data.csv](http://gofile.me/6pN25/RzLIg9T9E)
@@ -44,6 +47,7 @@ $ python3 test.py
 ## (Optional) Run NESA w/ your calendar data
 * Important: Download client_secret.json to the project folder before running get_google_calendar_events.py
 (See https://developers.google.com/google-apps/calendar/quickstart/python)
+* Important: Modify CLIENT_SECRET_FILE value of get_google_calendar_events.py
 ```
 $ python3 get_google_calendar_events.py
 ```
