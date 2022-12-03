@@ -19,18 +19,13 @@ NESA is a deep learning-based event scheduling assistant which can recommend mos
 * (Optional) NVIDIA GPU (memory size: 8GB or greater)
     * [CUDA](https://developer.nvidia.com/cuda-downloads), [cuDNN](https://developer.nvidia.com/cudnn)
 * A [Google](https://www.google.com) account
+* git lfs
 
 ## Installation
 Check if working directory is "nesa".
 
 ### Download word vector file and decompress it to your __home_dir/nlp__
 - [glove.840B.300d.zip](http://nlp.stanford.edu/data/glove.840B.300d.zip)
-
-### Download word, character dictionaries to __data__ directory
-- [dataset_180522_dict.pkl](http://gofile.me/6pN25/xCHU9Cmt3)
-
-### Download pretrained NESA checkpoint to __data__ directory
-- [nesa_180522_0.pth](http://gofile.me/6pN25/nAZbCQ5cx)
 
 ## Run NESA with the sample data
 ```
