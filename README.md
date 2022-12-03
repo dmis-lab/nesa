@@ -26,16 +26,13 @@ Check if working directory is "nesa".
 ### Download word vector file and decompress it to your __home_dir/nlp__
 - [glove.840B.300d.zip](http://nlp.stanford.edu/data/glove.840B.300d.zip)
 
-### Download sample data
-- [sample_data.csv](http://gofile.me/6pN25/RzLIg9T9E)
-
-### Download word, character dictionaries
+### Download word, character dictionaries to __data__ directory
 - [dataset_180522_dict.pkl](http://gofile.me/6pN25/xCHU9Cmt3)
 
-### Download pretrained NESA model
+### Download pretrained NESA checkpoint to __data__ directory
 - [nesa_180522_0.pth](http://gofile.me/6pN25/nAZbCQ5cx)
 
-## Run NESA with sample data
+## Run NESA with the sample data
 ```
 # Set PYTHONPATH environment variable
 $ export PYTHONPATH=$PYTHONPATH:$(pwd)
