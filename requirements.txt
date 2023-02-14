@@ -5,4 +5,4 @@ numpy
 oauth2client
 python-dateutil
 tensorboard
-torch==1.13.0
+torch>=1.13.1
