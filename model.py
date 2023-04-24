@@ -865,7 +865,7 @@ def get_metrics(outputs, targets, n_day_slots, n_classes, ex_targets=None,
         for target_slot_idx, ota in zip(targets, outputs_topall_idxes):
             target_rank_idx = -1
             for rank_idx, slot_idx in enumerate(ota):
-                if target_slot_idx.item() == slot_idx.item():
+                if -1 == target_rank_idx and target_slot_idx.item() == slot_idx.item():
                     target_rank_idx = rank_idx
                     if not calc_ndcg:
                         break
